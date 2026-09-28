@@ -1,5 +1,6 @@
 
     import { useState, useEffect, useMemo, useCallback } from 'react';
+    import ToastContainer from './ToastContainer.jsx';
 
     const INITIAL_NOTIFICATIONS = [
       // SYSTEM TAB
@@ -245,6 +246,19 @@
         addToast(newAlert);
       };
 
+      const testToast = () => {
+        addToast({
+          label: 'Test toast',
+          title: 'Thông báo thử nghiệm',
+          description: 'Toast xuất hiện từ góc trên bên phải và tự đóng sau vài giây.',
+          severity: 'info'
+        });
+      };
+
+      const dismissToast = (toastId) => {
+        setToasts((currentToasts) => currentToasts.filter((toast) => toast.toastId !== toastId));
+      };
+
       const toggleRead = (id) => {
         setNotifications(prev =>
           prev.map(item => item.id === id ? { ...item, read: !item.read } : item)
@@ -295,27 +309,7 @@
       return (
         <div className="min-h-screen overflow-x-hidden bg-[#0f172a] font-sans text-slate-100 selection:bg-emerald-500 selection:text-slate-950">
 
-          {/* Toast Notification Container */}
-          <div className="fixed top-20 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
-            {toasts.map(toast => (
-              <div
-                key={toast.toastId}
-                className="pointer-events-auto flex items-start gap-3 rounded-xl border border-slate-700/60 bg-[#1e293b] p-4 text-slate-100 shadow-2xl transition-all duration-300 animate-slide-in"
-              >
-                <div className="mt-0.5 text-lg text-emerald-400">
-                  <i className="fa-solid fa-circle-exclamation"></i>
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Thông báo mới</span>
-                    <span className="text-[10px] text-slate-500">Vừa xong</span>
-                  </div>
-                  <h5 className="text-xs font-semibold leading-tight text-white">{toast.title}</h5>
-                  <p className="text-[11px] text-slate-400 line-clamp-2">{toast.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
           {/* Header Navbar */}
           <header className="sticky top-0 z-30 border-b border-slate-700/60 bg-[#1e293b]/95 backdrop-blur-md">
@@ -338,6 +332,15 @@
                   title={soundEnabled ? "Tắt âm thanh cảnh báo" : "Bật âm thanh cảnh báo"}
                 >
                   <i className={`fa-solid ${soundEnabled ? 'fa-volume-high text-emerald-400' : 'fa-volume-xmark text-slate-500'}`}></i>
+                </button>
+
+                <button
+                  onClick={testToast}
+                  className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 hover:text-white"
+                  aria-label="Kiểm tra toast thông báo"
+                >
+                  <i className="fa-solid fa-vial text-cyan-300"></i>
+                  <span className="hidden sm:inline">Test toast</span>
                 </button>
 
                 <button
