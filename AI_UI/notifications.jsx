@@ -311,49 +311,6 @@
 
           <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-          {/* Header Navbar */}
-          <header className="sticky top-0 z-30 border-b border-slate-700/60 bg-[#1e293b]/95 backdrop-blur-md">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
-                  <i className="fa-solid fa-bell"></i>
-                </div>
-                <div>
-                  <h1 className="text-sm font-bold leading-tight text-white sm:text-base">Trung tâm thông báo</h1>
-                  <p className="text-xs text-slate-400">Smart Poultry AI · Chuồng #02</p>
-                </div>
-              </div>
-
-              {/* Header Quick Controls */}
-              <div className="flex items-center gap-2 sm:gap-3">
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-700/60 bg-slate-900/70 text-slate-300 transition-colors hover:bg-slate-800"
-                  title={soundEnabled ? "Tắt âm thanh cảnh báo" : "Bật âm thanh cảnh báo"}
-                >
-                  <i className={`fa-solid ${soundEnabled ? 'fa-volume-high text-emerald-400' : 'fa-volume-xmark text-slate-500'}`}></i>
-                </button>
-
-                <button
-                  onClick={testToast}
-                  className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 hover:text-white"
-                  aria-label="Kiểm tra toast thông báo"
-                >
-                  <i className="fa-solid fa-vial text-cyan-300"></i>
-                  <span className="hidden sm:inline">Test toast</span>
-                </button>
-
-                <button
-                  onClick={simulateNewAlert}
-                  className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-500 active:scale-95"
-                >
-                  <i className="fa-solid fa-bolt"></i>
-                  <span className="hidden md:inline">Giả lập Thông báo Mới</span>
-                </button>
-              </div>
-            </div>
-          </header>
-
           {/* Main Content Area */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
 
@@ -368,6 +325,32 @@
                   Theo dõi nhật ký vận hành thiết bị, cảnh báo chỉ số môi trường và phát hiện hành vi AI.
                 </p>
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-700/60 bg-[#1e293b] text-slate-300 transition-colors hover:bg-slate-800"
+                title={soundEnabled ? 'Tắt âm thanh cảnh báo' : 'Bật âm thanh cảnh báo'}
+                aria-label={soundEnabled ? 'Tắt âm thanh cảnh báo' : 'Bật âm thanh cảnh báo'}
+              >
+                <i className={`fa-solid ${soundEnabled ? 'fa-volume-high text-emerald-400' : 'fa-volume-xmark text-slate-500'}`}></i>
+              </button>
+              <button
+                onClick={testToast}
+                className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-700/60 bg-[#1e293b] px-3 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 hover:text-white"
+                aria-label="Kiểm tra toast thông báo"
+              >
+                <i className="fa-solid fa-vial text-cyan-300"></i>
+                <span>Test toast</span>
+              </button>
+              <button
+                onClick={simulateNewAlert}
+                className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-500 active:scale-95"
+              >
+                <i className="fa-solid fa-bolt"></i>
+                <span>Giả lập thông báo</span>
+              </button>
             </div>
 
             {/* Filter & Tab Controls Panel */}

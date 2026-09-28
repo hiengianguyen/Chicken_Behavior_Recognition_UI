@@ -26,7 +26,7 @@ export default function ToastContainer({ toasts = [], onDismiss }) {
     <div
       aria-live="polite"
       aria-relevant="additions"
-      className="pointer-events-none fixed right-4 top-20 z-[100] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 sm:right-6"
+      className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 sm:right-6"
     >
       {toasts.map((toast) => {
         const style = severityStyles[toast.severity] || severityStyles.info;
