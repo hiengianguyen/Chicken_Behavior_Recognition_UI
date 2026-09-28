@@ -2,13 +2,56 @@ import React, { useState, useEffect } from 'react';
 import { 
   Bird, AlertTriangle, Thermometer, Droplets, Wind, Cpu, 
   CheckCircle, ShieldCheck, AlertCircle, Video, Maximize, 
-  LineChart as LineChartIcon, Fan, PanelsTopLeft, Utensils, 
-  Play, Bell, UserMinus, CheckCircle2, Sliders,
-  X, ZoomIn, ZoomOut, RotateCcw
+  LineChart as LineChartIcon, Bell, UserMinus, CheckCircle2, Sliders,
+  X, ZoomIn, ZoomOut, RotateCcw, Power, LayoutDashboard, Eye, Zap, Workflow
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
+import NotificationCenter from '../AI_UI/notifications.jsx';
+import PowerDashboard from '../AI_UI/PowerDashboard.jsx';
+import AutomationRules, { initialRules } from '../AI_UI/AutomationRules.jsx';
+import DeviceControls from '../AI_UI/DeviceControls.jsx';
+import AIChickenAnalysis from '../AI_UI/AIChickenAnalysis.jsx';
+
+function NavigationSidebar({ activePage, onNavigate }) {
+  const navigationItems = [
+    { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+    { id: 'ai-analysis', label: 'Phân tích gà', icon: Eye },
+    { id: 'devices', label: 'Thiết bị', icon: Power },
+    { id: 'power', label: 'Điện năng', icon: Zap },
+    { id: 'automation', label: 'Quy tắc tự động', icon: Workflow },
+    { id: 'notifications', label: 'Thông báo', icon: Bell }
+  ];
+
+  return (
+    <aside className="z-40 flex w-full shrink-0 flex-col border-b border-slate-700/60 bg-[#111c2f] md:sticky md:top-0 md:h-screen md:w-60 md:border-b-0 md:border-r">
+      <div className="hidden items-center gap-3 border-b border-slate-700/60 px-5 py-5 md:flex">
+        <div className="rounded-xl bg-emerald-500/15 p-2 text-emerald-400"><Bird className="h-6 w-6" /></div>
+        <div><p className="text-sm font-bold text-white">Smart Poultry AI</p><p className="text-[10px] text-slate-500">FARM MANAGEMENT</p></div>
+      </div>
+      <nav aria-label="Điều hướng chính" className="flex gap-2 overflow-x-auto p-3 md:flex-col md:gap-1 md:p-4">
+        <p className="hidden px-3 pb-2 pt-1 text-[10px] font-semibold text-slate-500 md:block">KHÔNG GIAN LÀM VIỆC</p>
+        {navigationItems.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" onClick={() => onNavigate(id)} aria-current={activePage === id ? 'page' : undefined}
+            className={`flex min-h-11 shrink-0 items-center gap-3 rounded-xl border px-3 text-sm font-medium transition md:w-full ${activePage === id ? 'border-emerald-500/20 bg-emerald-500/15 text-emerald-300' : 'border-transparent text-slate-400 hover:bg-slate-800/70 hover:text-slate-100'}`}>
+            <Icon className="h-4 w-4" /><span>{label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="mt-auto hidden border-t border-slate-700/60 px-5 py-4 text-[11px] text-slate-500 md:block">Smart Poultry AI · Chuồng #02</div>
+    </aside>
+  );
+}
+
+function PageShell({ activePage, onNavigate, children }) {
+  return (
+    <div className="min-h-screen bg-[#0f172a] md:flex">
+      <NavigationSidebar activePage={activePage} onNavigate={onNavigate} />
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
 
 const initialChartData = [
   { time: '14:20', temp: 28.1, humidity: 60, gas: 10 },
@@ -26,6 +69,7 @@ const initialChartData = [
 const initialLogs = [
   {
     id: 1,
+    sourceType: 'ai',
     time: '14:22:10',
     type: 'Gà đứng im lâu (>10p)',
     icon: AlertCircle,
@@ -40,6 +84,7 @@ const initialLogs = [
   },
   {
     id: 2,
+    sourceType: 'ai',
     time: '13:05:45',
     type: 'Phát hiện gà tách đàn',
     icon: UserMinus,
@@ -54,6 +99,7 @@ const initialLogs = [
   },
   {
     id: 3,
+    sourceType: 'system',
     time: '09:12:00',
     type: 'Cửa sổ sát trần',
     icon: CheckCircle2,
@@ -73,8 +119,10 @@ const latestDataUrl = 'http://localhost:5000/api/latest-data';
 
 export default function App() {
   const [time, setTime] = useState(new Date());
+  const [activePage, setActivePage] = useState('dashboard');
   const [chartData, setChartData] = useState(initialChartData);
   const [logs, setLogs] = useState(initialLogs);
+  const [automationRules, setAutomationRules] = useState(initialRules);
   const [flockData, setFlockData] = useState(null);
   
   // Camera Modal & Zoom State
@@ -108,6 +156,7 @@ export default function App() {
   // Actuators State
   const [fanOn, setFanOn] = useState(false);
   const [windowOpen, setWindowOpen] = useState(true);
+  const [heaterOn, setHeaterOn] = useState(false);
   const [feedMessage, setFeedMessage] = useState(null);
   
   // Hazard State
@@ -159,6 +208,7 @@ export default function App() {
   const addLog = (type, location, severity, severityBg, action, status, statusColor) => {
     const newLog = {
       id: Date.now(),
+      sourceType: 'sensor',
       time: new Date().toLocaleTimeString('vi-VN'),
       type,
       icon: AlertTriangle,
@@ -234,13 +284,39 @@ export default function App() {
     });
   };
 
+  const normalizeBehavior = (behavior) => String(behavior ?? '').trim().toLocaleLowerCase('vi');
   const detectedChickens = flockData?.total_tracks ?? null;
-  const behaviorAlerts = flockData?.chickens?.filter((chicken) => (
-    chicken.behavior && chicken.behavior !== 'unknown' && chicken.behavior !== 'normal'
-  )).length ?? null;
+  const standingCount = flockData?.chickens?.filter(
+    (chicken) => normalizeBehavior(chicken.behavior) === 'standing'
+  ).length ?? null;
+  const behaviorAlerts = flockData?.chickens?.filter((chicken) => {
+    const behavior = normalizeBehavior(chicken.behavior);
+    return behavior && behavior !== 'unknown' && behavior !== 'normal';
+  }).length ?? null;
   const temporarilyMissingCount = flockData?.temporarily_missing ?? null;
 
+  if (activePage === 'notifications') {
+    return <PageShell activePage={activePage} onNavigate={setActivePage}><NotificationCenter /></PageShell>;
+  }
+  if (activePage === 'power') {
+    return <PageShell activePage={activePage} onNavigate={setActivePage}><PowerDashboard /></PageShell>;
+  }
+  if (activePage === 'automation') {
+    return <PageShell activePage={activePage} onNavigate={setActivePage}><AutomationRules rules={automationRules} setRules={setAutomationRules} /></PageShell>;
+  }
+  if (activePage === 'devices') {
+    return <PageShell activePage={activePage} onNavigate={setActivePage}>
+      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={setFanOn} windowOpen={windowOpen} setWindowOpen={setWindowOpen} heaterOn={heaterOn} setHeaterOn={setHeaterOn} onDispenseFeed={dispenseFeed} feedMessage={feedMessage} onNavigate={setActivePage} />
+    </PageShell>;
+  }
+  if (activePage === 'ai-analysis') {
+    return <PageShell activePage={activePage} onNavigate={setActivePage}>
+      <AIChickenAnalysis videoStreamUrl={videoStreamUrl} flockData={flockData} logs={logs} inferenceStatus={{ running: false }} />
+    </PageShell>;
+  }
+
   return (
+    <PageShell activePage={activePage} onNavigate={setActivePage}>
     <div className="bg-[#0f172a] text-slate-100 min-h-screen flex flex-col font-sans">
       {/* Top Header */}
       <header className="bg-[#1e293b]/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-50">
@@ -496,107 +572,6 @@ export default function App() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* 1. Fan Control */}
-          <div className="bg-[#1e293b] rounded-2xl border border-slate-700/50 p-5 shadow-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-blue-500/10 text-blue-400 rounded-lg">
-                  <Fan className={`w-5 h-5 ${fanOn ? 'animate-spin' : ''}`} />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-slate-100">Quạt Thông Gió</h3>
-                  <p className="text-xs text-slate-400">2 Quạt công nghiệp</p>
-                </div>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={fanOn} onChange={(e) => setFanOn(e.target.checked)} />
-                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-            <div className="space-y-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 text-xs">
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Trạng thái:</span>
-                <span className={`font-bold ${fanOn ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {fanOn ? 'Đang BẬT (100%)' : 'Đang TẮT'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Chế độ:</span>
-                <select className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none">
-                  <option>Tự động ({">"}30°C)</option>
-                  <option>Tự động ({">"}20 PPM)</option>
-                  <option>Thủ công</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Window Control */}
-          <div className="bg-[#1e293b] rounded-2xl border border-slate-700/50 p-5 shadow-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
-                  <PanelsTopLeft className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-slate-100">Cửa Sổ Sát Trần</h3>
-                  <p className="text-xs text-slate-400">Động cơ Step-motor</p>
-                </div>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={windowOpen} onChange={(e) => setWindowOpen(e.target.checked)} />
-                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-            <div className="space-y-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 text-xs">
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Trạng thái:</span>
-                <span className={`font-bold ${windowOpen ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  {windowOpen ? 'Đang MỞ (75%)' : 'Đang ĐÓNG KHÓA'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Hẹn giờ tự động:</span>
-                <span className="text-emerald-400 font-mono">06:00 Mở - 18:30 Đóng</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Auto Feeder */}
-          <div className="bg-[#1e293b] rounded-2xl border border-slate-700/50 p-5 shadow-lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg">
-                  <Utensils className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-slate-100">Máng Cho Ăn Tự Động</h3>
-                  <p className="text-xs text-slate-400">Sức chứa cám: 82%</p>
-                </div>
-              </div>
-              <button onClick={dispenseFeed} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-lg text-xs transition flex items-center gap-1 shadow">
-                <Play className="w-3.5 h-3.5" /> Xả Cám
-              </button>
-            </div>
-            <div className="space-y-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800 text-xs">
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Lần xả gần nhất:</span>
-                <span className="text-slate-200">07:00 Sáng (25kg)</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span>Lịch tiếp theo:</span>
-                <span className="text-amber-400 font-semibold">16:30 Chiều (Lần 2)</span>
-              </div>
-            </div>
-            {feedMessage && (
-               <div className="mt-2 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-1 rounded animate-pulse text-center">
-                 {feedMessage}
-               </div>
-            )}
-          </div>
-        </div>
-
         <div className="bg-[#1e293b] rounded-2xl border border-slate-700/50 p-5 shadow-lg">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
@@ -836,5 +811,6 @@ export default function App() {
 
       </main>
     </div>
+    </PageShell>
   );
 }
