@@ -33,6 +33,10 @@ export default function PowerDashboard() {
 
     return { deviceBreakdown, totalKWh, totalCost, installedPower };
   }, [devices, tariffRate]);
+  const energyRanking = useMemo(
+    () => [...analytics.deviceBreakdown].sort((first, second) => second.kWh - first.kWh),
+    [analytics.deviceBreakdown]
+  );
 
   const openTariffDialog = () => {
     setDraftRate(String(tariffRate));
@@ -164,7 +168,7 @@ export default function PowerDashboard() {
             </div>
           </div>
           <div className="space-y-4">
-            {analytics.deviceBreakdown.map((device) => {
+            {energyRanking.map((device) => {
               const share = analytics.totalKWh > 0 ? device.kWh / analytics.totalKWh * 100 : 0;
               return (
                 <div key={device.id}>
