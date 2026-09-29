@@ -2,15 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Bell, CalendarClock, Check, Clock3, Cpu, Pencil, Plus, Search, SlidersHorizontal, Trash2, X
 } from 'lucide-react';
-
-const devices = [
-  { id: 'FAN_01', name: 'Quạt hút thông gió #01' },
-  { id: 'FAN_02', name: 'Quạt hút thông gió #02' },
-  { id: 'HEATER_01', name: 'Đèn sưởi hồng ngoại Khu A' },
-  { id: 'MIST_01', name: 'Máy phun sương làm mát' },
-  { id: 'WINDOW_01', name: 'Mô-tơ cửa gió tự động' },
-  { id: 'LIGHT_01', name: 'Hệ thống đèn LED chiếu sáng' }
-];
+import { DEVICE_CATALOG } from './deviceCatalog';
 
 const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
@@ -280,7 +272,7 @@ export default function AutomationRules({ rules, setRules }) {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Thiết bị mục tiêu">
                   <select value={form.targetDeviceId} onChange={(event) => updateForm('targetDeviceId', event.target.value)} className={inputClass}>
-                    {devices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+                    {DEVICE_CATALOG.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
                   </select>
                 </Field>
                 <Field label="Hành động">
@@ -335,7 +327,7 @@ function ChoiceButton({ active, onClick, icon: Icon, children }) {
 }
 
 function RuleCard({ rule, onToggle, onEdit, onDelete }) {
-  const device = devices.find((item) => item.id === rule.targetDeviceId);
+  const device = DEVICE_CATALOG.find((item) => item.id === rule.targetDeviceId);
   const isSensorRule = rule.type === 'SENSOR';
   const condition = isSensorRule
     ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit}`
