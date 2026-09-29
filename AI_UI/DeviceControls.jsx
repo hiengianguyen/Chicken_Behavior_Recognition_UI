@@ -3,15 +3,7 @@ import {
   ArrowRight, CalendarClock, Clock3, Fan, Flame, PanelsTopLeft,
   Thermometer, ToggleLeft, Utensils, Wind
 } from 'lucide-react';
-
-const deviceNames = {
-  FAN_01: 'Quạt hút thông gió #01',
-  FAN_02: 'Quạt hút thông gió #02',
-  HEATER_01: 'Đèn sưởi hồng ngoại Khu A',
-  MIST_01: 'Máy phun sương làm mát',
-  WINDOW_01: 'Mô-tơ cửa gió tự động',
-  LIGHT_01: 'Hệ thống đèn LED chiếu sáng'
-};
+import { DEVICE_NAMES } from './deviceCatalog';
 
 export default function DeviceControls({
   rules,
@@ -44,19 +36,19 @@ export default function DeviceControls({
 
         <section aria-label="Thiết bị trong trang trại" className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <DeviceCard
-            title="Quạt thông gió"
-            subtitle="2 quạt công nghiệp"
+            title="Quạt hút thông gió"
+            subtitle="Làm mát và thông gió"
             icon={Fan}
             accent="cyan"
             enabled={fanOn}
             onChange={setFanOn}
             stateText={fanOn ? 'Đang bật · 100%' : 'Đang tắt'}
             detail="Điều khiển thủ công hoặc theo luật cảm biến"
-            deviceIds={['FAN_01', 'FAN_02']}
+            deviceIds={['FAN_01']}
             rules={rules}
           />
           <DeviceCard
-            title="Cửa sổ sát trần"
+            title="Mô-tơ cửa gió tự động"
             subtitle="Động cơ Step-motor"
             icon={PanelsTopLeft}
             accent="blue"
@@ -68,8 +60,8 @@ export default function DeviceControls({
             rules={rules}
           />
           <DeviceCard
-            title="Đèn sưởi ấm"
-            subtitle="Đèn sưởi hồng ngoại Khu A"
+            title="Đèn sưởi hồng ngoại"
+            subtitle="Sưởi ấm"
             icon={Flame}
             accent="amber"
             enabled={heaterOn}
@@ -124,7 +116,7 @@ export default function DeviceControls({
                         <span className={`h-2 w-2 shrink-0 rounded-full ${rule.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
                         <p className="truncate text-sm font-semibold text-slate-100">{rule.name}</p>
                       </div>
-                      <p className="mt-1 pl-4 text-xs text-slate-500">{deviceNames[rule.targetDeviceId] || rule.targetDeviceId}</p>
+                      <p className="mt-1 pl-4 text-xs text-slate-500">{DEVICE_NAMES[rule.targetDeviceId] || rule.targetDeviceId}</p>
                     </div>
                     <div className="flex min-w-0 items-center gap-2 text-xs text-slate-300">
                       <RuleIcon className="h-4 w-4 shrink-0 text-cyan-300" />
