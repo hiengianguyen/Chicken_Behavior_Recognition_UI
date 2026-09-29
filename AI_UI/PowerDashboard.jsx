@@ -21,6 +21,9 @@ export default function PowerDashboard() {
   const [tariffRate, setTariffRate] = useState(2500);
   const [draftRate, setDraftRate] = useState('2500');
   const [dialogStep, setDialogStep] = useState(null);
+  const [editingDeviceId, setEditingDeviceId] = useState(null);
+  const [draftWattage, setDraftWattage] = useState('');
+  const [wattageConfirmation, setWattageConfirmation] = useState(null);
 
   const analytics = useMemo(() => {
     const deviceBreakdown = devices.map((device) => {
@@ -43,11 +46,26 @@ export default function PowerDashboard() {
     setDialogStep('edit');
   };
 
-  const updateWattage = (deviceId, value) => {
-    const wattage = Math.max(0, Number.parseInt(value, 10) || 0);
+  const startWattageEdit = (device) => {
+    setEditingDeviceId(device.id);
+    setDraftWattage(String(device.wattage));
+  };
+
+  const requestWattageConfirmation = (device) => {
+    const wattage = Number(draftWattage);
+    if (Number.isFinite(wattage) && wattage >= 0) {
+      setWattageConfirmation({ deviceId: device.id, wattage });
+    }
+  };
+
+  const confirmWattageChange = () => {
+    if (!wattageConfirmation) return;
+    const { deviceId, wattage } = wattageConfirmation;
     setDevices((current) => current.map((device) => (
       device.id === deviceId ? { ...device, wattage } : device
     )));
+    setEditingDeviceId(null);
+    setWattageConfirmation(null);
   };
 
   const confirmTariffChange = () => {
@@ -134,18 +152,53 @@ export default function PowerDashboard() {
                       <div className="mt-1 text-xs text-slate-500">{device.category} · {device.id}</div>
                     </td>
                     <td className="px-5 py-4">
-                      <label className="flex w-28 items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-2.5 focus-within:border-emerald-500">
+                      <div className="flex items-center gap-2">
+                        <label className={`flex w-28 items-center gap-2 rounded-lg border px-2.5 ${editingDeviceId === device.id ? 'border-emerald-500 bg-slate-950' : 'border-slate-700 bg-slate-900/50'}`}>
                         <input
                           type="number"
                           min="0"
                           step="50"
-                          value={device.wattage}
-                          onChange={(event) => updateWattage(device.id, event.target.value)}
+                          value={editingDeviceId === device.id ? draftWattage : device.wattage}
+                          readOnly={editingDeviceId !== device.id}
+                          onChange={(event) => setDraftWattage(event.target.value)}
                           aria-label={`Công suất ${device.name}`}
-                          className="w-full bg-transparent py-1.5 text-sm font-semibold text-emerald-300 outline-none"
+                          className="w-full bg-transparent py-1.5 text-sm font-semibold text-emerald-300 outline-none read-only:cursor-default"
                         />
                         <span className="text-xs text-slate-500">W</span>
                       </label>
+                        {editingDeviceId === device.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => requestWattageConfirmation(device)}
+                              aria-label={`Xác nhận sửa công suất ${device.name}`}
+                              title="Lưu và xác nhận"
+                              className="rounded-lg p-1.5 text-emerald-300 transition hover:bg-emerald-500/10"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingDeviceId(null)}
+                              aria-label={`Hủy sửa công suất ${device.name}`}
+                              title="Hủy sửa"
+                              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => startWattageEdit(device)}
+                            aria-label={`Sửa công suất ${device.name}`}
+                            title="Sửa công suất"
+                            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-emerald-300"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-4 text-slate-300">{device.hours.toFixed(1)} giờ</td>
                     <td className="px-5 py-4 font-semibold text-cyan-300">{device.kWh.toFixed(2)} kWh</td>
@@ -188,6 +241,48 @@ export default function PowerDashboard() {
           </div>
         </section>
       </div>
+
+      {wattageConfirmation && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wattage-dialog-title"
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#172033] p-5 shadow-2xl sm:p-6"
+          >
+            <h2 id="wattage-dialog-title" className="font-bold text-white">Xác nhận thay đổi công suất</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              {devices.find((device) => device.id === wattageConfirmation.deviceId)?.name}
+            </p>
+            <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <p className="text-xs text-slate-400">Công suất hiện tại</p>
+              <p className="mt-1 text-sm font-semibold text-slate-200">
+                {devices.find((device) => device.id === wattageConfirmation.deviceId)?.wattage.toLocaleString('vi-VN')} W
+              </p>
+              <p className="mt-3 text-xs text-slate-400">Công suất mới</p>
+              <p className="mt-1 text-lg font-bold text-amber-300">
+                {wattageConfirmation.wattage.toLocaleString('vi-VN')} W
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setWattageConfirmation(null)}
+                className="rounded-xl px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+              >
+                Quay lại
+              </button>
+              <button
+                type="button"
+                onClick={confirmWattageChange}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
+              >
+                <Check className="h-4 w-4" /> Xác nhận thay đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dialogStep && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
