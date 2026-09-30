@@ -50,6 +50,11 @@ function PageShell({ activePage, onNavigate, children }) {
     <div className="min-h-screen bg-[#0f172a] md:flex">
       <NavigationSidebar activePage={activePage} onNavigate={onNavigate} />
       <div className="min-w-0 flex-1">{children}</div>
+      {activePage !== 'power' && (
+        <div className="hidden" aria-hidden="true">
+          <PowerDashboard trackingOnly />
+        </div>
+      )}
     </div>
   );
 }
