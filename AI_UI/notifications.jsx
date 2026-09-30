@@ -2,188 +2,7 @@
     import { useState, useEffect, useMemo, useCallback } from 'react';
     import { LoaderCircle, Thermometer } from 'lucide-react';
     import ToastContainer from './ToastContainer.jsx';
-    import { fetchCollection, removeRecord, saveRecord, classifySensorNotification } from '../src/api.js';
-
-    export const INITIAL_NOTIFICATIONS = [
-      // SYSTEM TAB
-      {
-        id: 'SYS-001',
-        category: 'system',
-        severity: 'info',
-        title: 'Quạt hút thông gió #02 đã TỰ ĐỘNG BẬT',
-        subtitle: 'Hệ thống tự động kích hoạt dựa trên kịch bản cài đặt',
-        description: 'Quạt hút công suất cao #02 đã được bật ở chế độ 80% công suất do nhiệt độ trung bình vượt ngưỡng 30°C.',
-        device: 'Quạt Hút #02',
-        actionState: 'Bật (ON)',
-        timestamp: '10:42 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'SYS-002',
-        category: 'system',
-        severity: 'warning',
-        title: 'Cửa gió tự động bị kẹt nhẹ khi đóng',
-        subtitle: 'Phát hiện lực cản cơ khí bất thường',
-        description: 'Cửa hướng gió phía Tây đóng đạt 85% thì motor báo quá dòng nhẹ. Khuyên kiểm tra bụi bẩn ổ khớp truyền động.',
-        device: 'Cửa Gió Tây',
-        actionState: 'Cảnh báo',
-        timestamp: '09:15 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'SYS-003',
-        category: 'system',
-        severity: 'info',
-        title: 'Hệ thống sưởi hồng ngoại khu A đã TẮT',
-        subtitle: 'Hoàn thành chu kỳ sưởi buổi sáng',
-        description: 'Đèn sưởi 500W được tắt tự động khi nhiệt độ chuồng đạt ngưỡng tối ưu 28°C.',
-        device: 'Đèn Sưởi Khu A',
-        actionState: 'Tắt (OFF)',
-        timestamp: '08:00 AM - Hôm nay',
-        read: true
-      },
-      {
-        id: 'SYS-004',
-        category: 'system',
-        severity: 'critical',
-        title: 'Máy bơm phun sương làm mát bị ngắt điện (Mất tải)',
-        subtitle: 'Aptomat chống rò/quá tải tự động ngắt',
-        description: 'Máy bơm tưới sưởi làm mát chuồng bị ngắt điện đột ngột. Cần kỹ thuật viên kiểm tra trực tiếp nguồn điện khẩn cấp.',
-        device: 'Máy Phun Sương #01',
-        actionState: 'Lỗi Ngắt Nguồn',
-        timestamp: '07:30 AM - Hôm nay',
-        read: false
-      },
-
-      // ENVIRONMENT TAB
-      {
-        id: 'ENV-001',
-        category: 'environment',
-        severity: 'critical',
-        title: 'Nồng độ Khí NH3 (Ammonia) vượt ngưỡng nguy hiểm (28.5 ppm)',
-        subtitle: 'Cảm biến Gas Sensor GS-03 phát hiện',
-        description: 'Nồng độ khí NH3 trong không khí đạt 28.5 ppm (ngưỡng an toàn < 20 ppm). Có nguy cơ gây bệnh đường hô hấp cho gà.',
-        sensorValue: '28.5 ppm',
-        unit: 'NH3',
-        timestamp: '10:35 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'ENV-002',
-        category: 'environment',
-        severity: 'warning',
-        title: 'Cảnh báo nhiệt độ lớn hơn 30 °C (33.8 °C)',
-        subtitle: 'Nhiệt độ cao hơn 30 °C · Cảm biến DHT22 Khu vực B',
-        description: 'Nhiệt độ môi trường đo được là 33.8°C, cao hơn mức lý tưởng 4.8°C. Bắt đầu kích hoạt chế độ làm mát tăng cường.',
-        sensorType: 'TEMP',
-        operator: '>',
-        threshold: 30,
-        sensorValue: '33.8 °C',
-        unit: 'Nhiệt độ',
-        timestamp: '10:10 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'ENV-003',
-        category: 'environment',
-        severity: 'warning',
-        title: 'Độ ẩm không khí xuống thấp (42%)',
-        subtitle: 'Cảm biến độ ẩm chuồng trung tâm',
-        description: 'Độ ẩm tương đối rơi xuống 42%, không khí bị khô. Khuyến nghị bật phun sương bù ẩm nhẹ.',
-        sensorValue: '42 %',
-        unit: 'Độ ẩm',
-        timestamp: '09:50 AM - Hôm nay',
-        read: true
-      },
-      {
-        id: 'ENV-004',
-        category: 'environment',
-        severity: 'info',
-        title: 'Khí CO2 ổn định ở mức an toàn (450 ppm)',
-        subtitle: 'Kiểm tra định kỳ cảm biến CO2',
-        description: 'Chỉ số lưu thông không khí đạt chất lượng tốt, lượng khí CO2 ổn định.',
-        sensorValue: '450 ppm',
-        unit: 'CO2',
-        timestamp: '06:00 AM - Hôm nay',
-        read: true
-      },
-
-      // AI VISION TAB
-      {
-        id: 'AI-001',
-        category: 'ai',
-        severity: 'critical',
-        title: 'Phát hiện gà nằm bất động > 25 phút (Nghi vấn gà bệnh)',
-        subtitle: 'AI Camera #01 - Góc Chuồng Phía Đông',
-        description: 'Mô hình Computer Vision phát hiện 01 cá thể gà nằm rủ bất động liên tục 25 phút không di chuyển ăn uống.',
-        camera: 'Cam #01 (Góc Đông)',
-        confidence: '96.2%',
-        imageUrl: 'https://images.unsplash.com/photo-1548550023-2bdb3c5beed7?auto=format&fit=crop&w=800&q=80',
-        recommendation: 'Cần cách ly cá thể nghi bị ốm để tránh lây nhiễm dịch bệnh cho toàn đàn.',
-        timestamp: '10:28 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'AI-002',
-        category: 'ai',
-        severity: 'warning',
-        title: 'Cảnh báo tụ tập mật độ cao ở khu vực máng nước',
-        subtitle: 'AI Camera #02 - Khu Uống Nước',
-        description: 'AI ghi nhận tụ tập mật độ gà dồn cục bất thường (hơn 45 con/m2) tại khu máng nước số 3. Có thể tắc vòi phun.',
-        camera: 'Cam #02 (Khu Máng Uống)',
-        confidence: '91.8%',
-        imageUrl: 'https://images.unsplash.com/photo-1516467508483-a7212febe31a?auto=format&fit=crop&w=800&q=80',
-        recommendation: 'Kiểm tra vòi cấp nước máng số 3 xem có bị tắc nghẽn nước không.',
-        timestamp: '09:40 AM - Hôm nay',
-        read: false
-      },
-      {
-        id: 'AI-003',
-        category: 'ai',
-        severity: 'warning',
-        title: 'Khay thức ăn tự động #04 hết sạch nguyên liệu',
-        subtitle: 'AI Camera #03 - Máng Ăn Trung Tâm',
-        description: 'Hình ảnh phân tích nhận diện khay chứa thức ăn trống hơn 90% liên tục trong 15 phút.',
-        camera: 'Cam #03 (Khu Máng Ăn)',
-        confidence: '94.5%',
-        imageUrl: 'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?auto=format&fit=crop&w=800&q=80',
-        recommendation: 'Bật máy tiếp cám tự động hoặc bổ sung thức ăn thủ công.',
-        timestamp: '08:20 AM - Hôm nay',
-        read: true
-      }
-    ];
-
-    const REALTIME_SIMULATION_POOL = [
-      {
-        category: 'system',
-        severity: 'info',
-        title: 'Hệ thống quạt làm mát #01 vừa KÍCH HOẠT',
-        subtitle: 'Tự động theo lập trình nhiệt độ',
-        description: 'Bật quạt công suất 100% để hạ nhiệt độ khu nuôi.',
-        device: 'Quạt Hút #01',
-        actionState: 'Bật (ON)'
-      },
-      {
-        category: 'environment',
-        severity: 'critical',
-        title: 'CẢNH BÁO KHÍ ĐỘC: Khí CO2 đạt 1200 ppm!',
-        subtitle: 'Cảm biến khí Gas Chuồng Trung Tâm',
-        description: 'Lượng CO2 tăng nhanh bất thường. Bật ngay hệ thống quạt thông gió cưỡng bức!',
-        sensorValue: '1200 ppm',
-        unit: 'CO2'
-      },
-      {
-        category: 'ai',
-        severity: 'warning',
-        title: 'AI phát hiện xô đẩy chen chúc tại máng ăn',
-        subtitle: 'AI Camera #04',
-        description: 'Đàn gà dồn nén tranh giành thức ăn khu vực máng số 2.',
-        camera: 'Cam #04 (Khu Cám)',
-        confidence: '93.1%',
-        imageUrl: 'https://images.unsplash.com/photo-1516467508483-a7212febe31a?auto=format&fit=crop&w=800&q=80',
-        recommendation: 'Bổ sung thêm khay ăn phụ để giảm áp lực tranh giành.'
-      }
-    ];
+    import { fetchCollection, fetchLatestSensor, removeRecord, saveRecord, classifySensorNotification } from '../src/api.js';
 
     const playAlertSound = (type = 'info', enabled = true) => {
       if (!enabled) return;
@@ -214,7 +33,7 @@
     };
 
     export default function NotificationCenter() {
-      const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+      const [notifications, setNotifications] = useState([]);
       const [currentTab, setCurrentTab] = useState('all');
       const [searchQuery, setSearchQuery] = useState('');
       const [soundEnabled, setSoundEnabled] = useState(true);
@@ -227,10 +46,21 @@
 
       useEffect(() => {
         let active = true;
-        fetchCollection('notifications')
-          .then((items) => { if (active) setNotifications(items); })
-          .catch(() => { if (active) setStorageMessage('Không kết nối được Firestore; đang hiển thị dữ liệu mẫu trên UI.'); });
-        return () => { active = false; };
+        const loadNotifications = async () => {
+          try {
+            const items = await fetchCollection('notifications');
+            if (active) setNotifications(items);
+          } catch {
+            if (active) setStorageMessage('Không kết nối được API; chưa thể tải thông báo từ cơ sở dữ liệu.');
+          }
+        };
+
+        loadNotifications();
+        const timer = window.setInterval(loadNotifications, 5000);
+        return () => {
+          active = false;
+          window.clearInterval(timer);
+        };
       }, []);
 
       const addToast = useCallback((alertObj) => {
@@ -243,56 +73,58 @@
         }, 4500);
       }, []);
 
-      const simulateNewAlert = async () => {
-        const randomSample = REALTIME_SIMULATION_POOL[Math.floor(Math.random() * REALTIME_SIMULATION_POOL.length)];
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' - Vừa xong';
-        const newId = (randomSample.category.toUpperCase()) + '-' + Math.floor(100 + Math.random() * 900);
-
-        const newAlert = {
-          ...randomSample,
-          id: newId,
-          timestamp: timeStr,
-          read: false
-        };
-
-        setNotifications(prev => [newAlert, ...prev]);
-        playAlertSound(newAlert.severity, soundEnabled);
-        addToast(newAlert);
-        try {
-          await saveRecord('notifications', newAlert.id, newAlert);
-          setStorageMessage('Đã lưu thông báo mới vào Firestore.');
-        } catch {
-          setStorageMessage('Thông báo đang hiển thị trên UI nhưng chưa lưu được vào Firestore.');
-        }
-      };
-
-      const simulateHighTemperature = async () => {
+      const checkCurrentSensors = async () => {
         setIsClassifying(true);
         try {
-          const result = await classifySensorNotification({
-            sensorType: 'TEMP', value: 33.8, threshold: 30, operator: '>', location: 'Khu vực B'
-          });
-          if (result.notification) {
-            setNotifications((current) => [result.notification, ...current]);
-            playAlertSound(result.notification.severity, soundEnabled);
-            addToast(result.notification);
-            setStorageMessage(`API đã phân loại và lưu: ${result.notification.title}`);
+          const [sensorPayload, settings] = await Promise.all([
+            fetchLatestSensor(),
+            fetchCollection('settings')
+          ]);
+          if (!sensorPayload.ready || !sensorPayload.data) {
+            setStorageMessage('Chưa nhận được mẫu cảm biến mới từ Arduino.');
+            return;
+          }
+
+          const thresholds = settings.find((item) => item.id === 'sensorThresholds');
+          if (!thresholds) {
+            setStorageMessage('Chưa có cấu hình ngưỡng cảm biến trong cơ sở dữ liệu.');
+            return;
+          }
+
+          const data = sensorPayload.data;
+          const checks = [
+            { sensorType: 'TEMP', value: data.temperature, threshold: Number(thresholds.tempMax), operator: '>' },
+            { sensorType: 'TEMP', value: data.temperature, threshold: Number(thresholds.tempMin), operator: '<' },
+            { sensorType: 'HUM', value: data.humidity, threshold: Number(thresholds.humidityMax), operator: '>' },
+            { sensorType: 'HUM', value: data.humidity, threshold: Number(thresholds.humidityMin), operator: '<' },
+            { sensorType: 'NH3', value: data.gas, threshold: Number(thresholds.gasMax), operator: '>' }
+          ].filter(({ value, threshold }) => Number.isFinite(value) && Number.isFinite(threshold));
+
+          const newAlerts = [];
+          for (const check of checks) {
+            const result = await classifySensorNotification({
+              ...check,
+              location: 'Chuồng #02',
+              save: true
+            });
+            if (result.notification) newAlerts.push(result.notification);
+          }
+
+          if (newAlerts.length) {
+            setNotifications((current) => [...newAlerts, ...current]);
+            newAlerts.forEach((alert) => {
+              playAlertSound(alert.severity, soundEnabled);
+              addToast(alert);
+            });
+            setStorageMessage(`API đã lưu ${newAlerts.length} cảnh báo cảm biến.`);
+          } else {
+            setStorageMessage('Các chỉ số cảm biến hiện nằm trong ngưỡng an toàn.');
           }
         } catch {
-          setStorageMessage('Không thể phân loại/lưu cảnh báo. Kiểm tra Flask và Firestore.');
+          setStorageMessage('Không thể đọc cảm biến hoặc lưu cảnh báo. Kiểm tra API và Firestore.');
         } finally {
           setIsClassifying(false);
         }
-      };
-
-      const testToast = () => {
-        addToast({
-          label: 'Test toast',
-          title: 'Thông báo thử nghiệm',
-          description: 'Toast xuất hiện từ góc trên bên phải và tự đóng sau vài giây.',
-          severity: 'info'
-        });
       };
 
       const dismissToast = (toastId) => {
@@ -386,27 +218,12 @@
                 <i className={`fa-solid ${soundEnabled ? 'fa-volume-high text-emerald-400' : 'fa-volume-xmark text-slate-500'}`}></i>
               </button>
               <button
-                onClick={testToast}
-                className="flex min-h-11 items-center gap-2 rounded-lg border border-slate-700/60 bg-[#1e293b] px-3 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 hover:text-white"
-                aria-label="Kiểm tra toast thông báo"
-              >
-                <i className="fa-solid fa-vial text-cyan-300"></i>
-                <span>Test toast</span>
-              </button>
-              <button
-                onClick={simulateNewAlert}
-                className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white shadow-lg shadow-emerald-900/20 transition hover:bg-emerald-500 active:scale-95"
-              >
-                <i className="fa-solid fa-bolt"></i>
-                <span>Giả lập thông báo</span>
-              </button>
-              <button
-                onClick={simulateHighTemperature}
+                onClick={checkCurrentSensors}
                 disabled={isClassifying}
                 className="flex min-h-11 items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 text-xs font-semibold text-orange-200 transition hover:bg-orange-500/20 disabled:opacity-60"
               >
                 {isClassifying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Thermometer className="h-4 w-4" />}
-                <span>Thử cảnh báo nhiệt độ &gt;30°C</span>
+                <span>Kiểm tra cảm biến</span>
               </button>
             </div>
             {storageMessage && <p role="status" className="text-right text-xs text-slate-400">{storageMessage}</p>}

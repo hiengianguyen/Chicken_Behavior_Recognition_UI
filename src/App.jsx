@@ -33,6 +33,34 @@ function areValidSensorThresholds(thresholds) {
     && thresholds.gasMax >= 0;
 }
 
+function mapNotificationToLog(notification) {
+  const severity = {
+    critical: ['Nghiêm trọng', 'bg-red-500/20 text-red-300'],
+    warning: ['Cảnh báo', 'bg-amber-500/20 text-amber-300'],
+    info: ['Thông tin', 'bg-blue-500/20 text-blue-300']
+  }[notification.severity] || ['Thông tin', 'bg-slate-500/20 text-slate-300'];
+  const presentation = {
+    system: [CheckCircle2, 'text-emerald-400', 'text-emerald-300'],
+    environment: [AlertTriangle, 'text-amber-400', 'text-amber-300'],
+    ai: [UserMinus, 'text-purple-400', 'text-purple-300']
+  }[notification.category] || [AlertCircle, 'text-slate-400', 'text-slate-300'];
+
+  return {
+    id: notification.id,
+    time: notification.timestamp || notification.createdAt || '--',
+    type: notification.title || 'Thông báo',
+    icon: presentation[0],
+    iconColor: presentation[1],
+    textColor: presentation[2],
+    location: notification.device || notification.camera || notification.sensorLabel || notification.location || notification.subtitle || '--',
+    severity: severity[0],
+    severityBg: severity[1],
+    action: notification.actionState || notification.recommendation || (notification.ruleId ? 'Tự động theo quy tắc' : '--'),
+    status: notification.read ? 'Đã đọc' : 'Chưa đọc',
+    statusColor: notification.read ? 'text-slate-400' : 'text-emerald-400'
+  };
+}
+
 function NavigationSidebar({ activePage, onNavigate }) {
   const navigationItems = [
     { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
@@ -77,54 +105,6 @@ function PageShell({ activePage, onNavigate, children }) {
   );
 }
 
-const initialLogs = [
-  {
-    id: 1,
-    sourceType: 'ai',
-    time: '14:22:10',
-    type: 'Gà đứng im lâu (>10p)',
-    icon: AlertCircle,
-    iconColor: 'text-amber-400',
-    textColor: 'text-amber-300',
-    location: 'Khu vực B - Cam 01 (ID: #G-084)',
-    severity: 'Trung bình',
-    severityBg: 'bg-amber-500/20 text-amber-300',
-    action: 'Gửi thông báo ứng dụng Mobile',
-    status: 'Đang theo dõi',
-    statusColor: 'text-slate-400'
-  },
-  {
-    id: 2,
-    sourceType: 'ai',
-    time: '13:05:45',
-    type: 'Phát hiện gà tách đàn',
-    icon: UserMinus,
-    iconColor: 'text-purple-400',
-    textColor: 'text-purple-300',
-    location: 'Góc Tây Bắc (ID: #G-102)',
-    severity: 'Thấp',
-    severityBg: 'bg-purple-500/20 text-purple-300',
-    action: 'Khoanh vùng trên Cam',
-    status: 'Đang theo dõi',
-    statusColor: 'text-slate-400'
-  },
-  {
-    id: 3,
-    sourceType: 'system',
-    time: '09:12:00',
-    type: 'Cửa sổ sát trần',
-    icon: CheckCircle2,
-    iconColor: 'text-emerald-400',
-    textColor: 'text-emerald-300',
-    location: 'Toàn bộ hệ thống',
-    severity: 'Thông tin',
-    severityBg: 'bg-blue-500/20 text-blue-300',
-    action: 'Mở cửa 75% theo lịch hẹn',
-    status: 'Hoàn tất',
-    statusColor: 'text-emerald-400'
-  }
-];
-
 const videoStreamUrl = 'http://localhost:5000/api/video?source=0';
 const latestDataUrl = 'http://localhost:5000/api/latest-data';
 const sensorDataUrl = 'http://localhost:5000/api/sensor';
@@ -132,12 +112,12 @@ const sensorDataUrl = 'http://localhost:5000/api/sensor';
 export default function App() {
   const [time, setTime] = useState(new Date());
   const lastSensorSampleId = useRef(null);
-  const lastSensorTimestamp = useRef(null);
   const deviceRecordsRef = useRef(new Map());
   const pendingAutomationRef = useRef(new Map());
+  const automationConditionStatesRef = useRef(new Map());
   const [activePage, setActivePage] = useState('dashboard');
   const [chartData, setChartData] = useState([]);
-  const [logs, setLogs] = useState(initialLogs);
+  const [logs, setLogs] = useState([]);
   const [automationRules, setAutomationRules] = useState([]);
   const [flockData, setFlockData] = useState(null);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
@@ -234,6 +214,25 @@ export default function App() {
     loadLatestData();
     const timer = setInterval(loadLatestData, 1000);
 
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadLogs = async () => {
+      try {
+        const notifications = await fetchCollection('notifications');
+        if (isMounted) setLogs(notifications.map(mapNotificationToLog));
+      } catch (error) {
+        console.error('Could not load dashboard notifications', error);
+      }
+    };
+
+    loadLogs();
+    const timer = setInterval(loadLogs, 5000);
     return () => {
       isMounted = false;
       clearInterval(timer);
@@ -351,8 +350,27 @@ export default function App() {
     const now = new Date();
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const currentDay = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][now.getDay()];
+    const updateConditionState = (rule, conditionMet, previouslyMet) => {
+      automationConditionStatesRef.current.set(rule.id, conditionMet);
+      if (previouslyMet === conditionMet) return;
 
-    automationRules.filter((rule) => rule.enabled && rule.targetDeviceId).forEach((rule) => {
+      const updatedRule = { ...rule, conditionMet };
+      setAutomationRules((current) => current.map((item) => item.id === rule.id ? updatedRule : item));
+      saveRecord('automationRules', rule.id, updatedRule).catch((error) => {
+        console.error(`Could not persist condition state for ${rule.id}`, error);
+      });
+    };
+
+    const triggeredRules = [];
+    automationRules.forEach((rule) => {
+      const previouslyMet = automationConditionStatesRef.current.has(rule.id)
+        ? automationConditionStatesRef.current.get(rule.id)
+        : rule.conditionMet === true;
+      if (!rule.enabled || !rule.targetDeviceId) {
+        updateConditionState(rule, false, previouslyMet);
+        return;
+      }
+
       let conditionMet = false;
       if (rule.type === 'SENSOR') {
         const field = sensorFields[rule.sensorType];
@@ -362,11 +380,16 @@ export default function App() {
         conditionMet = comparator(sensors[field], threshold);
       } else if (rule.type === 'SCHEDULE') {
         conditionMet = rule.time === currentTime && (rule.days || []).includes(currentDay);
-        if (!conditionMet) return;
       } else {
         return;
       }
 
+      updateConditionState(rule, conditionMet, previouslyMet);
+      if (conditionMet && !previouslyMet && rule.sendNotification && rule.targetAction === 'ON') {
+        triggeredRules.push(rule);
+      }
+
+      if (rule.type === 'SCHEDULE' && !conditionMet) return;
       const targetEnabled = conditionMet
         ? rule.targetAction === 'ON'
         : rule.targetAction !== 'ON';
@@ -376,6 +399,37 @@ export default function App() {
       } else {
         desiredStates.set(deviceId, targetEnabled);
       }
+    });
+
+    triggeredRules.forEach((rule) => {
+      if (conflictingDevices.has(rule.targetDeviceId)) return;
+      const catalogDevice = DEVICE_CATALOG.find((device) => device.id === rule.targetDeviceId);
+      const sensorField = sensorFields[rule.sensorType];
+      const condition = rule.type === 'SENSOR'
+        ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit || ''}`.trim()
+        : `${rule.time} · ${(rule.days || []).join(', ')}`;
+      const timestamp = new Date().toLocaleString('vi-VN');
+      const notificationId = `AUTO-${rule.id}-${Date.now()}`;
+      const notification = {
+        id: notificationId,
+        category: 'system',
+        severity: 'info',
+        title: `Đã kích hoạt quy tắc "${rule.name}"`,
+        subtitle: `Điều kiện thỏa mãn: ${condition}`,
+        description: rule.type === 'SENSOR'
+          ? `Giá trị cảm biến ${rule.sensorType} hiện tại là ${sensors[sensorField]} ${rule.unit || ''}. Đã bật thiết bị ${catalogDevice?.name || rule.targetDeviceId}.`.trim()
+          : `Đã đến lịch ${condition}. Thiết bị ${catalogDevice?.name || rule.targetDeviceId} được bật.`,
+        device: catalogDevice?.name || rule.targetDeviceId,
+        actionState: 'Bật (ON)',
+        ruleId: rule.id,
+        condition,
+        timestamp,
+        read: false
+      };
+
+      saveRecord('notifications', notificationId, notification).catch((error) => {
+        console.error(`Could not save automation notification for ${rule.id}`, error);
+      });
     });
 
     desiredStates.forEach((enabled, deviceId) => {
@@ -426,22 +480,21 @@ export default function App() {
   }, [feedMessage]);
 
   const addLog = (type, location, severity, severityBg, action, status, statusColor) => {
-    const newLog = {
-      id: Date.now(),
-      sourceType: 'sensor',
-      time: new Date().toLocaleTimeString('vi-VN'),
-      type,
-      icon: AlertTriangle,
-      iconColor: 'text-red-500',
-      textColor: 'text-red-400',
+    const notification = {
+      id: `SIM-${Date.now()}`,
+      category: 'environment',
+      severity: severity === 'Nghiêm trọng' ? 'critical' : 'warning',
+      title: type,
+      subtitle: location,
+      description: action,
       location,
-      severity,
-      severityBg,
-      action,
-      status,
-      statusColor
+      actionState: status,
+      timestamp: new Date().toLocaleString('vi-VN'),
+      read: false
     };
-    setLogs(prevLogs => [newLog, ...prevLogs]);
+    saveRecord('notifications', notification.id, notification)
+      .then(() => setLogs((current) => [mapNotificationToLog(notification), ...current]))
+      .catch((error) => console.error('Could not save dashboard notification', error));
   };
 
   const triggerGasAlert = () => {
@@ -664,7 +717,7 @@ export default function App() {
                   <CheckCircle className="w-3.5 h-3.5 mr-1" /> Lý tưởng
                 </span>
               )}
-              {sensors && sensorThresholds && `(Ngưỡng: ${sensorThresholds.tempMin}°C - ${sensorThresholds.tempMax}°C)`}
+              {sensorThresholds && `(Ngưỡng: ${sensorThresholds.tempMin}°C - ${sensorThresholds.tempMax}°C)`}
             </div>
           </div>
 
@@ -682,15 +735,17 @@ export default function App() {
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
-              {sensors && sensorThresholds ? (
-                <>
-                  <span className={`font-semibold flex items-center mr-2 ${humidityStatus === 'Ổn định' ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {humidityStatus === 'Ổn định' ? <CheckCircle className="w-3.5 h-3.5 mr-1" /> : <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
-                    {humidityStatus}
-                  </span>
-                  (Ngưỡng: {sensorThresholds.humidityMin}% - {sensorThresholds.humidityMax}%)
-                </>
-              ) : <span className="text-slate-500 font-semibold">{sensors ? 'Chưa cấu hình ngưỡng' : 'Chưa có dữ liệu'}</span>}
+              {!sensors ? (
+                <span className="text-slate-500 font-semibold">Chưa có dữ liệu</span>
+              ) : !sensorThresholds ? (
+                <span className="text-slate-500 font-semibold">Chưa cấu hình ngưỡng</span>
+              ) : (
+                <span className={`font-semibold flex items-center mr-2 ${humidityStatus === 'Ổn định' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {humidityStatus === 'Ổn định' ? <CheckCircle className="w-3.5 h-3.5 mr-1" /> : <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
+                  {humidityStatus}
+                </span>
+              )}
+              {sensorThresholds && `(Ngưỡng: ${sensorThresholds.humidityMin}% - ${sensorThresholds.humidityMax}%)`}
             </div>
           </div>
 
@@ -721,7 +776,7 @@ export default function App() {
                   <ShieldCheck className="w-3.5 h-3.5 mr-1" /> An toàn
                 </span>
               )}
-              {sensors && sensorThresholds && `(Báo động > ${sensorThresholds.gasMax} PPM)`}
+              {sensorThresholds && `(Báo động > ${sensorThresholds.gasMax} PPM)`}
             </div>
           </div>
 
@@ -920,7 +975,13 @@ export default function App() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {logs.map((log) => {
+                {logs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-500">
+                      Chưa có nhật ký trong cơ sở dữ liệu.
+                    </td>
+                  </tr>
+                ) : logs.map((log) => {
                   const Icon = log.icon;
                   return (
                     <tr key={log.id} className={`hover:bg-slate-800/40 transition ${log.severity === 'Nghiêm trọng' || log.severity === 'Cao' ? 'bg-red-950/20' : ''}`}>

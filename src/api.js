@@ -20,6 +20,10 @@ export async function fetchCollection(collection) {
   return payload.items || [];
 }
 
+export function fetchLatestSensor() {
+  return requestJson('/sensor?after=-1');
+}
+
 export function saveRecord(collection, id, record) {
   return requestJson(`/data/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`, {
     method: 'PUT',
