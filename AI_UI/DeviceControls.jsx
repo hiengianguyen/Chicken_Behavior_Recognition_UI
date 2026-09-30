@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  ArrowRight, CalendarClock, Clock3, Fan, Flame, PanelsTopLeft,
+  ArrowRight, CalendarClock, Clock3, Fan, Flame, Lightbulb, PanelsTopLeft,
   Thermometer, ToggleLeft, Utensils, Wind
 } from 'lucide-react';
 import { DEVICE_NAMES } from './deviceCatalog';
@@ -14,8 +14,13 @@ export default function DeviceControls({
   setWindowOpen,
   heaterOn,
   setHeaterOn,
+  mistOn,
+  setMistOn,
+  lightOn,
+  setLightOn,
+  feederOn,
+  setFeederOn,
   onDispenseFeed,
-  feedMessage,
   onNavigate
 }) {
   const sortedRules = [...rules].sort((first, second) => Number(second.enabled) - Number(first.enabled));
@@ -85,32 +90,53 @@ export default function DeviceControls({
             rules={rules}
             onPersist={persistDevice}
           />
-          <article className="flex min-h-48 flex-col justify-between rounded-2xl border border-slate-700/60 bg-[#1e293b] p-5 shadow-lg">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-2.5 text-amber-300"><Utensils className="h-5 w-5" /></div>
-                <div className="min-w-0">
-                  <h2 className="font-semibold text-white">Máng cho ăn tự động</h2>
-                  <p className="mt-0.5 text-xs text-slate-400">Sức chứa cám: 82%</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => {
-                onDispenseFeed();
-                persistDevice({
-                  id: 'FEEDER_01', deviceId: 'FEEDER_01', name: 'Máng cho ăn tự động', category: 'Cho ăn',
-                  enabled: true, feedCapacityPercent: 82, lastDispensedAmountKg: 10,
-                  nextSchedule: '16:30'
-                });
-              }} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-500">
-                <Utensils className="h-3.5 w-3.5" /> Xả cám
-              </button>
-            </div>
-            <div className="mt-5 space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-xs">
-              <div className="flex items-center justify-between gap-3 text-slate-400"><span>Lần xả gần nhất</span><span className="text-slate-200">07:00 sáng · 25 kg</span></div>
-              <div className="flex items-center justify-between gap-3 text-slate-400"><span>Lịch tiếp theo</span><span className="font-semibold text-amber-300">16:30 chiều</span></div>
-              {feedMessage && <p role="status" className="border-t border-slate-800 pt-2 text-amber-300">{feedMessage}</p>}
-            </div>
-          </article>
+          <DeviceCard
+            title="Máy bơm phun sương làm mát"
+            subtitle="Làm mát chuồng nuôi"
+            icon={Wind}
+            accent="blue"
+            enabled={mistOn}
+            onChange={setMistOn}
+            stateText={mistOn ? 'Đang bật' : 'Đang tắt'}
+            detail="Điều khiển theo luật cảm biến"
+            deviceIds={['MIST_01']}
+            rules={rules}
+            onPersist={persistDevice}
+          />
+          <DeviceCard
+            title="Hệ thống chiếu sáng LED"
+            subtitle="Chiếu sáng chuồng nuôi"
+            icon={Lightbulb}
+            accent="amber"
+            enabled={lightOn}
+            onChange={setLightOn}
+            stateText={lightOn ? 'Đang bật' : 'Đang tắt'}
+            detail="Điều khiển theo luật cảm biến hoặc lịch"
+            deviceIds={['LIGHT_01']}
+            rules={rules}
+            onPersist={persistDevice}
+          />
+          <DeviceCard
+            title="Máng cho ăn tự động"
+            subtitle="Sức chứa cám: 82%"
+            icon={Utensils}
+            accent="amber"
+            enabled={feederOn}
+            onChange={setFeederOn}
+            stateText={feederOn ? 'Đang bật' : 'Đang tắt'}
+            detail="Điều khiển theo lịch hoặc quy tắc tự động"
+            deviceIds={['FEEDER_01']}
+            rules={rules}
+            onPersist={persistDevice}
+            onAction={() => {
+              onDispenseFeed();
+              persistDevice({
+                id: 'FEEDER_01', deviceId: 'FEEDER_01', name: 'Máng cho ăn tự động', category: 'Cho ăn',
+                enabled: true, feedCapacityPercent: 82, lastDispensedAmountKg: 10,
+                nextSchedule: '16:30'
+              });
+            }}
+          />
         </section>
         {saveMessage && <p role="status" className="-mt-4 text-xs text-slate-400">{saveMessage}</p>}
 
@@ -160,7 +186,7 @@ export default function DeviceControls({
   );
 }
 
-function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, stateText, detail, deviceIds, rules, onPersist }) {
+function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, stateText, detail, deviceIds, rules, onPersist, onAction }) {
   const accents = {
     cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300',
     blue: 'border-blue-500/20 bg-blue-500/10 text-blue-300',
@@ -194,6 +220,11 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, st
           <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
         </label>
       </div>
+      {onAction && (
+        <button type="button" onClick={onAction} className="mt-4 inline-flex min-h-9 items-center gap-2 self-start rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-500">
+          <Utensils className="h-3.5 w-3.5" /> Xả cám
+        </button>
+      )}
       <div className="mt-5 space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
         <div className="flex items-center justify-between gap-3 text-xs">
           <span className="text-slate-400">Trạng thái</span>

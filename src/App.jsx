@@ -10,10 +10,28 @@ import {
 } from 'recharts';
 import NotificationCenter from '../AI_UI/notifications.jsx';
 import PowerDashboard from '../AI_UI/PowerDashboard.jsx';
-import AutomationRules, { initialRules } from '../AI_UI/AutomationRules.jsx';
+import AutomationRules from '../AI_UI/AutomationRules.jsx';
 import DeviceControls from '../AI_UI/DeviceControls.jsx';
 import AIChickenAnalysis from '../AI_UI/AIChickenAnalysis.jsx';
-import { fetchCollection } from './api.js';
+import { DEVICE_CATALOG } from '../AI_UI/deviceCatalog.js';
+import { fetchCollection, saveRecord } from './api.js';
+
+const emptySensorThresholdDraft = {
+  tempMin: '',
+  tempMax: '',
+  humidityMin: '',
+  humidityMax: '',
+  gasMax: ''
+};
+
+function areValidSensorThresholds(thresholds) {
+  return Object.values(thresholds).every(Number.isFinite)
+    && thresholds.tempMin < thresholds.tempMax
+    && thresholds.humidityMin >= 0
+    && thresholds.humidityMin < thresholds.humidityMax
+    && thresholds.humidityMax <= 100
+    && thresholds.gasMax >= 0;
+}
 
 function NavigationSidebar({ activePage, onNavigate }) {
   const navigationItems = [
@@ -115,11 +133,14 @@ export default function App() {
   const [time, setTime] = useState(new Date());
   const lastSensorSampleId = useRef(null);
   const lastSensorTimestamp = useRef(null);
+  const deviceRecordsRef = useRef(new Map());
+  const pendingAutomationRef = useRef(new Map());
   const [activePage, setActivePage] = useState('dashboard');
   const [chartData, setChartData] = useState([]);
   const [logs, setLogs] = useState(initialLogs);
-  const [automationRules, setAutomationRules] = useState(initialRules);
+  const [automationRules, setAutomationRules] = useState([]);
   const [flockData, setFlockData] = useState(null);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
   
   // Camera Modal & Zoom State
   const [isCameraExpanded, setIsCameraExpanded] = useState(false);
@@ -146,13 +167,39 @@ export default function App() {
     setInfoModal(prev => ({ ...prev, isOpen: false }));
   };
 
+  const setDeviceState = (deviceId, enabled) => {
+    const stateSetters = {
+      FAN_01: setFanOn,
+      WINDOW_01: setWindowOpen,
+      HEATER_01: setHeaterOn,
+      MIST_01: setMistOn,
+      LIGHT_01: setLightOn,
+      FEEDER_01: setFeederOn
+    };
+    stateSetters[deviceId]?.(enabled);
+  };
+
+  const handleManualDeviceChange = (deviceId, enabled) => {
+    setDeviceState(deviceId, enabled);
+    const existingRecord = deviceRecordsRef.current.get(deviceId) || {};
+    deviceRecordsRef.current.set(deviceId, { ...existingRecord, id: deviceId, deviceId, enabled });
+  };
+
   // Sensors State
   const [sensors, setSensors] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [sensorThresholds, setSensorThresholds] = useState(null);
+  const [thresholdDraft, setThresholdDraft] = useState(emptySensorThresholdDraft);
+  const [isThresholdEditorOpen, setIsThresholdEditorOpen] = useState(false);
+  const [thresholdSaveState, setThresholdSaveState] = useState('idle');
   
   // Actuators State
   const [fanOn, setFanOn] = useState(false);
   const [windowOpen, setWindowOpen] = useState(true);
   const [heaterOn, setHeaterOn] = useState(false);
+  const [mistOn, setMistOn] = useState(false);
+  const [lightOn, setLightOn] = useState(false);
+  const [feederOn, setFeederOn] = useState(false);
   const [feedMessage, setFeedMessage] = useState(null);
   
   // Hazard State
@@ -191,6 +238,25 @@ export default function App() {
       isMounted = false;
       clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchCollection('settings')
+      .then((records) => {
+        const savedThresholds = records.find((record) => record.id === 'sensorThresholds');
+        if (!isMounted || !savedThresholds) return;
+
+        const loadedThresholds = Object.fromEntries(
+          Object.keys(emptySensorThresholdDraft).map((key) => [key, savedThresholds[key]])
+        );
+        if (areValidSensorThresholds(loadedThresholds)) {
+          setSensorThresholds(loadedThresholds);
+          setThresholdDraft(loadedThresholds);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
   }, []);
 
   useEffect(() => {
@@ -252,15 +318,104 @@ export default function App() {
     Promise.all([fetchCollection('automationRules'), fetchCollection('devices')])
       .then(([rules, devices]) => {
         if (!isMounted) return;
-        if (rules.length) setAutomationRules(rules);
+        setAutomationRules(rules);
         const byId = new Map(devices.map((device) => [device.deviceId || device.id, device]));
+        deviceRecordsRef.current = byId;
+        setDevices(devices);
         if (byId.has('FAN_01')) setFanOn(Boolean(byId.get('FAN_01').enabled));
         if (byId.has('WINDOW_01')) setWindowOpen(Boolean(byId.get('WINDOW_01').enabled));
         if (byId.has('HEATER_01')) setHeaterOn(Boolean(byId.get('HEATER_01').enabled));
+        if (byId.has('MIST_01')) setMistOn(Boolean(byId.get('MIST_01').enabled));
+        if (byId.has('LIGHT_01')) setLightOn(Boolean(byId.get('LIGHT_01').enabled));
+        if (byId.has('FEEDER_01')) setFeederOn(Boolean(byId.get('FEEDER_01').enabled));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) setDevicesLoaded(true);
+      });
     return () => { isMounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!devicesLoaded) return;
+
+    const sensorFields = { TEMP: 'temp', HUM: 'humidity', NH3: 'gas' };
+    const compare = {
+      '>': (value, threshold) => value > threshold,
+      '>=': (value, threshold) => value >= threshold,
+      '<': (value, threshold) => value < threshold,
+      '<=': (value, threshold) => value <= threshold
+    };
+    const desiredStates = new Map();
+    const conflictingDevices = new Set();
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const currentDay = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][now.getDay()];
+
+    automationRules.filter((rule) => rule.enabled && rule.targetDeviceId).forEach((rule) => {
+      let conditionMet = false;
+      if (rule.type === 'SENSOR') {
+        const field = sensorFields[rule.sensorType];
+        const comparator = compare[rule.operator];
+        const threshold = Number(rule.thresholdValue);
+        if (!field || !comparator || !Number.isFinite(threshold) || !Number.isFinite(sensors?.[field])) return;
+        conditionMet = comparator(sensors[field], threshold);
+      } else if (rule.type === 'SCHEDULE') {
+        conditionMet = rule.time === currentTime && (rule.days || []).includes(currentDay);
+        if (!conditionMet) return;
+      } else {
+        return;
+      }
+
+      const targetEnabled = conditionMet
+        ? rule.targetAction === 'ON'
+        : rule.targetAction !== 'ON';
+      const deviceId = rule.targetDeviceId;
+      if (desiredStates.has(deviceId) && desiredStates.get(deviceId) !== targetEnabled) {
+        conflictingDevices.add(deviceId);
+      } else {
+        desiredStates.set(deviceId, targetEnabled);
+      }
+    });
+
+    desiredStates.forEach((enabled, deviceId) => {
+      if (conflictingDevices.has(deviceId)) return;
+      const pendingState = pendingAutomationRef.current.get(deviceId);
+      const currentRecord = deviceRecordsRef.current.get(deviceId);
+      if (pendingState !== undefined || (currentRecord && currentRecord.enabled === enabled)) return;
+
+      pendingAutomationRef.current.set(deviceId, enabled);
+      const catalogDevice = DEVICE_CATALOG.find((device) => device.id === deviceId);
+      const nextRecord = {
+        ...currentRecord,
+        id: deviceId,
+        deviceId,
+        name: currentRecord?.name || catalogDevice?.name || deviceId,
+        enabled,
+        stateText: enabled ? 'Đang bật' : 'Đang tắt',
+        updatedAt: new Date().toISOString(),
+        controlSource: 'automation'
+      };
+
+      saveRecord('devices', deviceId, nextRecord)
+        .then(() => {
+          deviceRecordsRef.current.set(deviceId, nextRecord);
+          setDeviceState(deviceId, enabled);
+          setDevices((current) => [
+            ...current.filter((device) => (device.deviceId || device.id) !== deviceId),
+            nextRecord
+          ]);
+        })
+        .catch((error) => {
+          console.error(`Could not persist automated state for ${deviceId}`, error);
+        })
+        .finally(() => {
+          if (pendingAutomationRef.current.get(deviceId) === enabled) {
+            pendingAutomationRef.current.delete(deviceId);
+          }
+        });
+    });
+  }, [sensors, automationRules, devicesLoaded, time]);
 
   // Clear feed message automatically after 3 seconds
   useEffect(() => {
@@ -342,6 +497,7 @@ export default function App() {
   const dismissHazard = () => setHazard(null);
   
   const dispenseFeed = () => {
+    handleManualDeviceChange('FEEDER_01', true);
     setFeedMessage('🔔 Đã kích hoạt mô-tơ xả cám! Đang cung cấp 10kg thức ăn vào máng.');
     setInfoModal({
       isOpen: true,
@@ -361,6 +517,40 @@ export default function App() {
     return behavior && behavior !== 'unknown' && behavior !== 'normal';
   }).length ?? null;
   const temporarilyMissingCount = flockData?.temporarily_missing ?? null;
+  const temperatureStatus = sensors && sensorThresholds
+    ? sensors.temp < sensorThresholds.tempMin
+      ? 'Nhiệt độ thấp'
+      : sensors.temp > sensorThresholds.tempMax ? 'Quá nhiệt' : 'Lý tưởng'
+    : null;
+  const humidityStatus = sensors && sensorThresholds
+    ? sensors.humidity < sensorThresholds.humidityMin
+      ? 'Độ ẩm thấp'
+      : sensors.humidity > sensorThresholds.humidityMax ? 'Độ ẩm cao' : 'Ổn định'
+    : null;
+  const gasAlarm = Boolean(sensors && sensorThresholds && sensors.gas > sensorThresholds.gasMax);
+
+  const saveSensorThresholds = async (event) => {
+    event.preventDefault();
+    const nextThresholds = Object.fromEntries(
+      Object.entries(thresholdDraft).map(([key, value]) => [key, Number(value)])
+    );
+
+    if (Object.values(thresholdDraft).some((value) => String(value).trim() === '')
+      || !areValidSensorThresholds(nextThresholds)) {
+      setThresholdSaveState('invalid');
+      return;
+    }
+
+    setThresholdSaveState('saving');
+    try {
+      await saveRecord('settings', 'sensorThresholds', nextThresholds);
+      setSensorThresholds(nextThresholds);
+      setThresholdDraft(nextThresholds);
+      setThresholdSaveState('saved');
+    } catch (error) {
+      setThresholdSaveState('error');
+    }
+  };
 
   if (activePage === 'notifications') {
     return <PageShell activePage={activePage} onNavigate={setActivePage}><NotificationCenter /></PageShell>;
@@ -373,7 +563,7 @@ export default function App() {
   }
   if (activePage === 'devices') {
     return <PageShell activePage={activePage} onNavigate={setActivePage}>
-      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={setFanOn} windowOpen={windowOpen} setWindowOpen={setWindowOpen} heaterOn={heaterOn} setHeaterOn={setHeaterOn} onDispenseFeed={dispenseFeed} feedMessage={feedMessage} onNavigate={setActivePage} />
+      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={(enabled) => handleManualDeviceChange('FAN_01', enabled)} windowOpen={windowOpen} setWindowOpen={(enabled) => handleManualDeviceChange('WINDOW_01', enabled)} heaterOn={heaterOn} setHeaterOn={(enabled) => handleManualDeviceChange('HEATER_01', enabled)} mistOn={mistOn} setMistOn={(enabled) => handleManualDeviceChange('MIST_01', enabled)} lightOn={lightOn} setLightOn={(enabled) => handleManualDeviceChange('LIGHT_01', enabled)} feederOn={feederOn} setFeederOn={(enabled) => handleManualDeviceChange('FEEDER_01', enabled)} onDispenseFeed={dispenseFeed} feedMessage={feedMessage} onNavigate={setActivePage} />
     </PageShell>;
   }
   if (activePage === 'ai-analysis') {
@@ -400,9 +590,19 @@ export default function App() {
             </div>
 
             <div className="hidden md:flex items-center space-x-4">
-              <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>Hệ thống Hoạt động BÌNH THƯỜNG</span>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setThresholdDraft(sensorThresholds || emptySensorThresholdDraft);
+                    setThresholdSaveState('idle');
+                    setIsThresholdEditorOpen((open) => !open);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-emerald-500/40 hover:text-emerald-300"
+                >
+                  <Sliders className="h-4 w-4" />
+                  {isThresholdEditorOpen ? 'Đóng cài đặt ngưỡng' : 'Chỉnh ngưỡng cảm biến'}
+                </button>
               </div>
               <div className="text-right border-l border-slate-700 pl-4">
                 <div className="text-xs text-slate-400">Thời gian thực</div>
@@ -453,16 +653,18 @@ export default function App() {
             <div className="mt-3 flex items-center text-xs text-slate-400">
               {!sensors ? (
                 <span className="text-slate-500 font-semibold mr-2">Chưa có dữ liệu</span>
-              ) : sensors.temp > 31 ? (
+              ) : !sensorThresholds ? (
+                <span className="text-slate-500 font-semibold mr-2">Chưa cấu hình ngưỡng</span>
+              ) : temperatureStatus !== 'Lý tưởng' ? (
                 <span className="text-red-400 font-semibold flex items-center mr-2">
-                  <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Quá nhiệt
+                  <AlertTriangle className="w-3.5 h-3.5 mr-1" /> {temperatureStatus}
                 </span>
               ) : (
                 <span className="text-emerald-400 font-semibold flex items-center mr-2">
                   <CheckCircle className="w-3.5 h-3.5 mr-1" /> Lý tưởng
                 </span>
               )}
-              {sensors && '(Ngưỡng: 26°C - 31°C)'}
+              {sensors && sensorThresholds && `(Ngưỡng: ${sensorThresholds.tempMin}°C - ${sensorThresholds.tempMax}°C)`}
             </div>
           </div>
 
@@ -480,14 +682,15 @@ export default function App() {
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
-              {sensors ? (
+              {sensors && sensorThresholds ? (
                 <>
-                  <span className="text-emerald-400 font-semibold flex items-center mr-2">
-                    <CheckCircle className="w-3.5 h-3.5 mr-1" /> Ổn định
+                  <span className={`font-semibold flex items-center mr-2 ${humidityStatus === 'Ổn định' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {humidityStatus === 'Ổn định' ? <CheckCircle className="w-3.5 h-3.5 mr-1" /> : <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
+                    {humidityStatus}
                   </span>
-                  (Ngưỡng: 55% - 70%)
+                  (Ngưỡng: {sensorThresholds.humidityMin}% - {sensorThresholds.humidityMax}%)
                 </>
-              ) : <span className="text-slate-500 font-semibold">Chưa có dữ liệu</span>}
+              ) : <span className="text-slate-500 font-semibold">{sensors ? 'Chưa cấu hình ngưỡng' : 'Chưa có dữ liệu'}</span>}
             </div>
           </div>
 
@@ -500,14 +703,16 @@ export default function App() {
                   {sensors ? `${sensors.gas} PPM` : '--'}
                 </h3>
               </div>
-              <div className={`p-3 rounded-xl ${sensors?.gas > 25 ? 'bg-red-500/20 text-red-400 animate-bounce' : 'bg-emerald-500/10 text-emerald-400'}`}>
+              <div className={`p-3 rounded-xl ${gasAlarm ? 'bg-red-500/20 text-red-400 animate-bounce' : sensorThresholds ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700/50 text-slate-400'}`}>
                 <Wind className="w-6 h-6" />
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
               {!sensors ? (
                 <span className="text-slate-500 font-semibold mr-2">Chưa có dữ liệu</span>
-              ) : sensors.gas > 25 ? (
+              ) : !sensorThresholds ? (
+                <span className="text-slate-500 font-semibold mr-2">Chưa cấu hình ngưỡng</span>
+              ) : gasAlarm ? (
                 <span className="text-red-400 font-bold flex items-center mr-2">
                   <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Báo Động!
                 </span>
@@ -516,7 +721,7 @@ export default function App() {
                   <ShieldCheck className="w-3.5 h-3.5 mr-1" /> An toàn
                 </span>
               )}
-              {sensors && '(Báo động > 25 PPM)'}
+              {sensors && sensorThresholds && `(Báo động > ${sensorThresholds.gasMax} PPM)`}
             </div>
           </div>
 
@@ -543,6 +748,47 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {isThresholdEditorOpen && (
+          <form onSubmit={saveSensorThresholds} className="grid grid-cols-2 gap-3 rounded-xl border border-slate-700/70 bg-[#1e293b] p-4 sm:grid-cols-3 lg:grid-cols-5">
+            {[
+              ['tempMin', 'Nhiệt độ thấp nhất', '°C', '0.1'],
+              ['tempMax', 'Nhiệt độ cao nhất', '°C', '0.1'],
+              ['humidityMin', 'Độ ẩm thấp nhất', '%', '1'],
+              ['humidityMax', 'Độ ẩm cao nhất', '%', '1'],
+              ['gasMax', 'Ngưỡng khí gas', 'PPM', '1']
+            ].map(([key, label, unit, step]) => (
+              <label key={key} className="space-y-1.5 text-xs text-slate-400">
+                <span>{label} ({unit})</span>
+                <input
+                  type="number"
+                  step={step}
+                  value={thresholdDraft[key]}
+                  onChange={(event) => {
+                    setThresholdDraft((current) => ({ ...current, [key]: event.target.value }));
+                    setThresholdSaveState('idle');
+                  }}
+                  className="w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                />
+              </label>
+            ))}
+            <div className="col-span-2 flex flex-wrap items-center justify-between gap-3 sm:col-span-3 lg:col-span-5">
+              <p aria-live="polite" className={`text-xs ${thresholdSaveState === 'error' || thresholdSaveState === 'invalid' ? 'text-red-400' : 'text-slate-400'}`}>
+                {thresholdSaveState === 'saving' && 'Đang lưu ngưỡng...'}
+                {thresholdSaveState === 'saved' && 'Đã lưu ngưỡng vào cơ sở dữ liệu.'}
+                {thresholdSaveState === 'invalid' && 'Giá trị không hợp lệ. Ngưỡng thấp phải nhỏ hơn ngưỡng cao.'}
+                {thresholdSaveState === 'error' && 'Không lưu được ngưỡng. Vui lòng thử lại.'}
+              </p>
+              <button
+                type="submit"
+                disabled={thresholdSaveState === 'saving'}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60"
+              >
+                Lưu ngưỡng
+              </button>
+            </div>
+          </form>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           

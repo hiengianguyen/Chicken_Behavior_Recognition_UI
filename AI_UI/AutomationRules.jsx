@@ -7,26 +7,6 @@ import { removeRecord, saveRecord } from '../src/api.js';
 
 const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
-export const initialRules = [
-  {
-    id: 'RULE-101', name: 'Tự động xả khí độc NH3', enabled: true, type: 'SENSOR',
-    sensorType: 'NH3', operator: '>', thresholdValue: 20, unit: 'ppm',
-    targetDeviceId: 'FAN_01', targetAction: 'ON', sendNotification: true,
-    lastTriggered: '10 phút trước', triggerCount: 14
-  },
-  {
-    id: 'RULE-102', name: 'Sưởi ấm gà con buổi tối', enabled: true, type: 'SCHEDULE',
-    time: '18:30', days: weekdays, targetDeviceId: 'HEATER_01', targetAction: 'ON',
-    sendNotification: false, lastTriggered: 'Hôm qua 18:30', triggerCount: 45
-  },
-  {
-    id: 'RULE-103', name: 'Làm mát giảm nhiệt độ chuồng', enabled: false, type: 'SENSOR',
-    sensorType: 'TEMP', operator: '>', thresholdValue: 33, unit: '°C',
-    targetDeviceId: 'MIST_01', targetAction: 'ON', sendNotification: true,
-    lastTriggered: '3 ngày trước', triggerCount: 8
-  }
-];
-
 const emptyForm = () => ({
   name: '', type: 'SENSOR', sensorType: 'TEMP', operator: '>',
   thresholdValue: '30', time: '08:00', days: [...weekdays],
