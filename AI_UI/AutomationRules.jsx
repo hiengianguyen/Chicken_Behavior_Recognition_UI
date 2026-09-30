@@ -3,6 +3,7 @@ import {
   Bell, CalendarClock, Check, Clock3, Cpu, Pencil, Plus, Search, SlidersHorizontal, Trash2, X
 } from 'lucide-react';
 import { DEVICE_CATALOG } from './deviceCatalog';
+import { removeRecord, saveRecord } from '../src/api.js';
 
 const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
@@ -75,22 +76,21 @@ export default function AutomationRules({ rules, setRules }) {
     setIsFormOpen(true);
   };
 
-  const saveRule = (event) => {
+  const saveRule = async (event) => {
     event.preventDefault();
     const unit = sensorUnits[form.sensorType];
+    let savedRule;
 
     if (editingId) {
-      setRules((current) => current.map((rule) => rule.id === editingId
-        ? {
-          ...rule,
-          ...form,
-          thresholdValue: Number(form.thresholdValue),
-          unit
-        }
-        : rule));
-      notify(`Đã cập nhật luật “${form.name.trim()}”`);
+      savedRule = {
+        ...rules.find((rule) => rule.id === editingId),
+        ...form,
+        thresholdValue: Number(form.thresholdValue),
+        unit
+      };
+      setRules((current) => current.map((rule) => rule.id === editingId ? savedRule : rule));
     } else {
-      const newRule = {
+      savedRule = {
         ...form,
         id: `RULE-${Date.now()}`,
         name: form.name.trim(),
@@ -100,22 +100,37 @@ export default function AutomationRules({ rules, setRules }) {
         lastTriggered: 'Chưa kích hoạt',
         triggerCount: 0
       };
-      setRules((current) => [newRule, ...current]);
-      notify(`Đã tạo luật “${form.name.trim()}”`);
+      setRules((current) => [savedRule, ...current]);
     }
 
     setIsFormOpen(false);
+    try {
+      await saveRecord('automationRules', savedRule.id, savedRule);
+      notify(`Đã lưu luật “${savedRule.name}” vào Firestore`);
+    } catch {
+      notify('Đã cập nhật trên UI nhưng không lưu được luật vào Firestore.', 'error');
+    }
   };
 
-  const toggleRule = (rule) => {
-    const enabled = !rule.enabled;
-    setRules((current) => current.map((item) => item.id === rule.id ? { ...item, enabled } : item));
-    notify(`${enabled ? 'Đã bật' : 'Đã tắt'} luật “${rule.name}”`, enabled ? 'success' : 'info');
+  const toggleRule = async (rule) => {
+    const updatedRule = { ...rule, enabled: !rule.enabled };
+    setRules((current) => current.map((item) => item.id === rule.id ? updatedRule : item));
+    try {
+      await saveRecord('automationRules', updatedRule.id, updatedRule);
+      notify(`${updatedRule.enabled ? 'Đã bật' : 'Đã tắt'} và lưu luật “${rule.name}”`, updatedRule.enabled ? 'success' : 'info');
+    } catch {
+      notify('Không lưu được trạng thái quy tắc vào Firestore.', 'error');
+    }
   };
 
-  const deleteRule = (rule) => {
+  const deleteRule = async (rule) => {
     setRules((current) => current.filter((item) => item.id !== rule.id));
-    notify(`Đã xóa luật “${rule.name}”`, 'info');
+    try {
+      await removeRecord('automationRules', rule.id);
+      notify(`Đã xóa luật “${rule.name}”`, 'info');
+    } catch {
+      notify('Không xóa được quy tắc trong Firestore.', 'error');
+    }
   };
 
   const updateForm = (field, value) => setForm((current) => ({ ...current, [field]: value }));
@@ -191,7 +206,7 @@ export default function AutomationRules({ rules, setRules }) {
       </div>
 
       {toast && (
-        <div role="status" className={`fixed bottom-5 right-5 z-[70] flex max-w-[calc(100vw-2.5rem)] items-center gap-2 rounded-xl border px-4 py-3 text-sm shadow-xl ${toast.tone === 'info' ? 'border-cyan-500/30 bg-[#172033] text-cyan-200' : 'border-emerald-500/30 bg-[#172033] text-emerald-200'}`}>
+        <div role="status" className={`fixed bottom-5 right-5 z-[70] flex max-w-[calc(100vw-2.5rem)] items-center gap-2 rounded-xl border px-4 py-3 text-sm shadow-xl ${toast.tone === 'error' ? 'border-rose-500/30 bg-[#172033] text-rose-200' : toast.tone === 'info' ? 'border-cyan-500/30 bg-[#172033] text-cyan-200' : 'border-emerald-500/30 bg-[#172033] text-emerald-200'}`}>
           <Check className="h-4 w-4 shrink-0" />
           <span>{toast.message}</span>
         </div>

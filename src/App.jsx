@@ -13,6 +13,7 @@ import PowerDashboard from '../AI_UI/PowerDashboard.jsx';
 import AutomationRules, { initialRules } from '../AI_UI/AutomationRules.jsx';
 import DeviceControls from '../AI_UI/DeviceControls.jsx';
 import AIChickenAnalysis from '../AI_UI/AIChickenAnalysis.jsx';
+import { fetchCollection } from './api.js';
 
 function NavigationSidebar({ activePage, onNavigate }) {
   const navigationItems = [
@@ -195,6 +196,21 @@ export default function App() {
       isMounted = false;
       clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([fetchCollection('automationRules'), fetchCollection('devices')])
+      .then(([rules, devices]) => {
+        if (!isMounted) return;
+        if (rules.length) setAutomationRules(rules);
+        const byId = new Map(devices.map((device) => [device.deviceId || device.id, device]));
+        if (byId.has('FAN_01')) setFanOn(Boolean(byId.get('FAN_01').enabled));
+        if (byId.has('WINDOW_01')) setWindowOpen(Boolean(byId.get('WINDOW_01').enabled));
+        if (byId.has('HEATER_01')) setHeaterOn(Boolean(byId.get('HEATER_01').enabled));
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
   }, []);
 
   // Clear feed message automatically after 3 seconds

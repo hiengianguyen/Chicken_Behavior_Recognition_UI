@@ -1,9 +1,10 @@
 export const DEVICE_CATALOG = [
   { id: 'FAN_01', name: 'Quạt hút thông gió' },
-  { id: 'HEATER_01', name: 'Đèn sưởi hồng ngoại' },
-  { id: 'MIST_01', name: 'Máy phun sương làm mát' },
+  { id: 'HEATER_01', name: 'Đèn sưởi hồng ngoại Khu A' },
+  { id: 'MIST_01', name: 'Máy bơm phun sương làm mát' },
   { id: 'WINDOW_01', name: 'Mô-tơ cửa gió tự động' },
-  { id: 'LIGHT_01', name: 'Hệ thống đèn LED chiếu sáng' }
+  { id: 'LIGHT_01', name: 'Hệ thống chiếu sáng LED' },
+  { id: 'FEEDER_01', name: 'Máng cho ăn tự động' }
 ];
 
 export const DEVICE_NAMES = Object.fromEntries(

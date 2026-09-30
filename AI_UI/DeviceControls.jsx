@@ -4,6 +4,7 @@ import {
   Thermometer, ToggleLeft, Utensils, Wind
 } from 'lucide-react';
 import { DEVICE_NAMES } from './deviceCatalog';
+import { saveRecord } from '../src/api.js';
 
 export default function DeviceControls({
   rules,
@@ -18,6 +19,16 @@ export default function DeviceControls({
   onNavigate
 }) {
   const sortedRules = [...rules].sort((first, second) => Number(second.enabled) - Number(first.enabled));
+  const [saveMessage, setSaveMessage] = React.useState('');
+
+  const persistDevice = async (record) => {
+    try {
+      await saveRecord('devices', record.id, { ...record, updatedAt: new Date().toISOString() });
+      setSaveMessage('Đã lưu trạng thái thiết bị.');
+    } catch {
+      setSaveMessage('Không lưu được trạng thái thiết bị vào Firestore.');
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[#0f172a] px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
@@ -46,6 +57,7 @@ export default function DeviceControls({
             detail="Điều khiển thủ công hoặc theo luật cảm biến"
             deviceIds={['FAN_01']}
             rules={rules}
+            onPersist={persistDevice}
           />
           <DeviceCard
             title="Mô-tơ cửa gió tự động"
@@ -58,6 +70,7 @@ export default function DeviceControls({
             detail="Điều khiển thủ công hoặc theo lịch trình"
             deviceIds={['WINDOW_01']}
             rules={rules}
+            onPersist={persistDevice}
           />
           <DeviceCard
             title="Đèn sưởi hồng ngoại"
@@ -70,6 +83,7 @@ export default function DeviceControls({
             detail="Có thể cài theo nhiệt độ hoặc lịch trong Quy tắc tự động"
             deviceIds={['HEATER_01']}
             rules={rules}
+            onPersist={persistDevice}
           />
           <article className="flex min-h-48 flex-col justify-between rounded-2xl border border-slate-700/60 bg-[#1e293b] p-5 shadow-lg">
             <div className="flex items-start justify-between gap-4">
@@ -80,7 +94,14 @@ export default function DeviceControls({
                   <p className="mt-0.5 text-xs text-slate-400">Sức chứa cám: 82%</p>
                 </div>
               </div>
-              <button type="button" onClick={onDispenseFeed} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-500">
+              <button type="button" onClick={() => {
+                onDispenseFeed();
+                persistDevice({
+                  id: 'FEEDER_01', deviceId: 'FEEDER_01', name: 'Máng cho ăn tự động', category: 'Cho ăn',
+                  enabled: true, feedCapacityPercent: 82, lastDispensedAmountKg: 10,
+                  nextSchedule: '16:30'
+                });
+              }} className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-500">
                 <Utensils className="h-3.5 w-3.5" /> Xả cám
               </button>
             </div>
@@ -91,6 +112,7 @@ export default function DeviceControls({
             </div>
           </article>
         </section>
+        {saveMessage && <p role="status" className="-mt-4 text-xs text-slate-400">{saveMessage}</p>}
 
         <section className="overflow-hidden rounded-2xl border border-slate-700/60 bg-[#172033] shadow-lg">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/60 px-5 py-4">
@@ -138,7 +160,7 @@ export default function DeviceControls({
   );
 }
 
-function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, stateText, detail, deviceIds, rules }) {
+function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, stateText, detail, deviceIds, rules, onPersist }) {
   const accents = {
     cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300',
     blue: 'border-blue-500/20 bg-blue-500/10 text-blue-300',
@@ -158,7 +180,16 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, st
           </div>
         </div>
         <label className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center" title={`Bật/tắt ${title}`}>
-          <input type="checkbox" className="peer sr-only" checked={enabled} onChange={(event) => onChange(event.target.checked)} aria-label={`Bật/tắt ${title}`} />
+          <input type="checkbox" className="peer sr-only" checked={enabled} onChange={(event) => {
+            const nextEnabled = event.target.checked;
+            onChange(nextEnabled);
+            onPersist({
+              id: deviceIds[0], deviceId: deviceIds[0], name: title, category: subtitle,
+              enabled: nextEnabled,
+              stateText: nextEnabled ? (deviceIds[0] === 'FAN_01' ? 'Đang bật · 100%' : deviceIds[0] === 'WINDOW_01' ? 'Đang mở · 75%' : 'Đang bật') : 'Đang tắt',
+              detail, linkedRuleIds: attachedRules.map((rule) => rule.id)
+            });
+          }} aria-label={`Bật/tắt ${title}`} />
           <span className="absolute inset-0 rounded-full bg-slate-700 transition peer-checked:bg-emerald-600 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#1e293b]" />
           <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
         </label>
