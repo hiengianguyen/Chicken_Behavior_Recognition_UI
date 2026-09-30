@@ -1,8 +1,10 @@
 
     import { useState, useEffect, useMemo, useCallback } from 'react';
+    import { LoaderCircle, Thermometer } from 'lucide-react';
     import ToastContainer from './ToastContainer.jsx';
+    import { fetchCollection, removeRecord, saveRecord, classifySensorNotification } from '../src/api.js';
 
-    const INITIAL_NOTIFICATIONS = [
+    export const INITIAL_NOTIFICATIONS = [
       // SYSTEM TAB
       {
         id: 'SYS-001',
@@ -70,9 +72,12 @@
         id: 'ENV-002',
         category: 'environment',
         severity: 'warning',
-        title: 'Nhiệt độ chuồng gà tăng cao (33.8 °C)',
-        subtitle: 'Cảm biến Temp-Hum DHT22 Khu vực B',
+        title: 'Cảnh báo nhiệt độ lớn hơn 30 °C (33.8 °C)',
+        subtitle: 'Nhiệt độ cao hơn 30 °C · Cảm biến DHT22 Khu vực B',
         description: 'Nhiệt độ môi trường đo được là 33.8°C, cao hơn mức lý tưởng 4.8°C. Bắt đầu kích hoạt chế độ làm mát tăng cường.',
+        sensorType: 'TEMP',
+        operator: '>',
+        threshold: 30,
         sensorValue: '33.8 °C',
         unit: 'Nhiệt độ',
         timestamp: '10:10 AM - Hôm nay',
@@ -217,6 +222,16 @@
       const [selectedAiItem, setSelectedAiItem] = useState(null);
       const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
       const [toasts, setToasts] = useState([]);
+      const [storageMessage, setStorageMessage] = useState('');
+      const [isClassifying, setIsClassifying] = useState(false);
+
+      useEffect(() => {
+        let active = true;
+        fetchCollection('notifications')
+          .then((items) => { if (active) setNotifications(items); })
+          .catch(() => { if (active) setStorageMessage('Không kết nối được Firestore; đang hiển thị dữ liệu mẫu trên UI.'); });
+        return () => { active = false; };
+      }, []);
 
       const addToast = useCallback((alertObj) => {
         const toastId = Date.now();
@@ -228,7 +243,7 @@
         }, 4500);
       }, []);
 
-      const simulateNewAlert = () => {
+      const simulateNewAlert = async () => {
         const randomSample = REALTIME_SIMULATION_POOL[Math.floor(Math.random() * REALTIME_SIMULATION_POOL.length)];
         const now = new Date();
         const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' - Vừa xong';
@@ -244,6 +259,31 @@
         setNotifications(prev => [newAlert, ...prev]);
         playAlertSound(newAlert.severity, soundEnabled);
         addToast(newAlert);
+        try {
+          await saveRecord('notifications', newAlert.id, newAlert);
+          setStorageMessage('Đã lưu thông báo mới vào Firestore.');
+        } catch {
+          setStorageMessage('Thông báo đang hiển thị trên UI nhưng chưa lưu được vào Firestore.');
+        }
+      };
+
+      const simulateHighTemperature = async () => {
+        setIsClassifying(true);
+        try {
+          const result = await classifySensorNotification({
+            sensorType: 'TEMP', value: 33.8, threshold: 30, operator: '>', location: 'Khu vực B'
+          });
+          if (result.notification) {
+            setNotifications((current) => [result.notification, ...current]);
+            playAlertSound(result.notification.severity, soundEnabled);
+            addToast(result.notification);
+            setStorageMessage(`API đã phân loại và lưu: ${result.notification.title}`);
+          }
+        } catch {
+          setStorageMessage('Không thể phân loại/lưu cảnh báo. Kiểm tra Flask và Firestore.');
+        } finally {
+          setIsClassifying(false);
+        }
       };
 
       const testToast = () => {
@@ -260,17 +300,26 @@
       };
 
       const toggleRead = (id) => {
-        setNotifications(prev =>
-          prev.map(item => item.id === id ? { ...item, read: !item.read } : item)
-        );
+        const updated = notifications.find((item) => item.id === id);
+        if (!updated) return;
+        const next = { ...updated, read: !updated.read };
+        setNotifications((current) => current.map((item) => item.id === id ? next : item));
+        saveRecord('notifications', id, next).catch(() => setStorageMessage('Không lưu được trạng thái đã đọc.'));
       };
 
       const deleteNotification = (id) => {
         setNotifications(prev => prev.filter(item => item.id !== id));
+        removeRecord('notifications', id).catch(() => setStorageMessage('Không xóa được thông báo trong Firestore.'));
       };
 
-      const clearAllNotifications = () => {
-        setNotifications([]);
+      const clearAllNotifications = async () => {
+        try {
+          await Promise.all(notifications.map((item) => removeRecord('notifications', item.id)));
+          setNotifications([]);
+          setStorageMessage('Đã xóa toàn bộ thông báo khỏi Firestore.');
+        } catch {
+          setStorageMessage('Không thể xóa toàn bộ thông báo khỏi Firestore.');
+        }
         setShowClearConfirmModal(false);
       };
 
@@ -351,7 +400,16 @@
                 <i className="fa-solid fa-bolt"></i>
                 <span>Giả lập thông báo</span>
               </button>
+              <button
+                onClick={simulateHighTemperature}
+                disabled={isClassifying}
+                className="flex min-h-11 items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 text-xs font-semibold text-orange-200 transition hover:bg-orange-500/20 disabled:opacity-60"
+              >
+                {isClassifying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Thermometer className="h-4 w-4" />}
+                <span>Thử cảnh báo nhiệt độ &gt;30°C</span>
+              </button>
             </div>
+            {storageMessage && <p role="status" className="text-right text-xs text-slate-400">{storageMessage}</p>}
 
             {/* Filter & Tab Controls Panel */}
             <div className="flex flex-col gap-4 rounded-2xl border border-slate-700/60 bg-[#1e293b] p-4 shadow-lg">

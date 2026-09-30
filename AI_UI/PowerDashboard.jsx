@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Bolt, Check, Clock3, DollarSign, Pencil, X, Zap } from 'lucide-react';
+import { fetchCollection, saveRecord } from '../src/api.js';
 
-const initialDevices = [
-  { id: 'DEV-01', name: 'Quạt hút thông gió #01', category: 'Thông gió', wattage: 1500, hours: 4 },
-  { id: 'DEV-02', name: 'Quạt hút thông gió #02', category: 'Thông gió', wattage: 1500, hours: 3 },
-  { id: 'DEV-03', name: 'Đèn sưởi hồng ngoại Khu A', category: 'Sưởi ấm', wattage: 800, hours: 5 },
-  { id: 'DEV-04', name: 'Máy bơm phun sương làm mát', category: 'Làm mát', wattage: 750, hours: 2 },
-  { id: 'DEV-05', name: 'Mô-tơ cửa gió tự động', category: 'Cơ khí', wattage: 350, hours: 1 },
-  { id: 'DEV-06', name: 'Hệ thống chiếu sáng LED', category: 'Chiếu sáng', wattage: 200, hours: 8 }
+export const initialDevices = [
+  { id: 'FAN_01', name: 'Quạt hút thông gió #01', category: 'Thông gió', wattage: 1500, hours: 4 },
+  { id: 'HEATER_01', name: 'Đèn sưởi hồng ngoại Khu A', category: 'Sưởi ấm', wattage: 800, hours: 5 },
+  { id: 'MIST_01', name: 'Máy bơm phun sương làm mát', category: 'Làm mát', wattage: 750, hours: 2 },
+  { id: 'WINDOW_01', name: 'Mô-tơ cửa gió tự động', category: 'Cơ khí', wattage: 350, hours: 1 },
+  { id: 'LIGHT_01', name: 'Hệ thống chiếu sáng LED', category: 'Chiếu sáng', wattage: 200, hours: 8 }
 ];
 
 const formatVnd = (amount) => new Intl.NumberFormat('vi-VN', {
@@ -24,6 +24,40 @@ export default function PowerDashboard() {
   const [editingDeviceId, setEditingDeviceId] = useState(null);
   const [draftWattage, setDraftWattage] = useState('');
   const [wattageConfirmation, setWattageConfirmation] = useState(null);
+  const [saveMessage, setSaveMessage] = useState('');
+
+  const persistPower = async (nextDevices, nextRate) => {
+    const results = await Promise.all(nextDevices.map((device) => {
+      const kWh = device.wattage * device.hours / 1000;
+      return saveRecord('power', device.id, {
+        ...device,
+        deviceId: device.id,
+        tariffRate: nextRate,
+        kWh,
+        cost: kWh * nextRate,
+        updatedAt: new Date().toISOString()
+      });
+    }));
+    return results;
+  };
+
+  React.useEffect(() => {
+    let active = true;
+    fetchCollection('power').then((records) => {
+      if (!active || !records.length) return;
+      const stored = new Map(records.map((record) => [record.deviceId || record.id, record]));
+      setDevices((current) => current.map((device) => ({
+        ...device,
+        ...(stored.has(device.id) ? stored.get(device.id) : {})
+      })));
+      const storedRate = records.find((record) => Number(record.tariffRate) > 0)?.tariffRate;
+      if (storedRate) {
+        setTariffRate(Number(storedRate));
+        setDraftRate(String(storedRate));
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const analytics = useMemo(() => {
     const deviceBreakdown = devices.map((device) => {
@@ -61,16 +95,24 @@ export default function PowerDashboard() {
   const confirmWattageChange = () => {
     if (!wattageConfirmation) return;
     const { deviceId, wattage } = wattageConfirmation;
-    setDevices((current) => current.map((device) => (
+    const nextDevices = devices.map((device) => (
       device.id === deviceId ? { ...device, wattage } : device
-    )));
+    ));
+    setDevices(nextDevices);
     setEditingDeviceId(null);
     setWattageConfirmation(null);
+    persistPower(nextDevices, tariffRate)
+      .then(() => setSaveMessage('Đã lưu dữ liệu điện năng.'))
+      .catch(() => setSaveMessage('Không lưu được dữ liệu điện năng.'));
   };
 
   const confirmTariffChange = () => {
-    setTariffRate(Number(draftRate));
+    const nextRate = Number(draftRate);
+    setTariffRate(nextRate);
     setDialogStep(null);
+    persistPower(devices, nextRate)
+      .then(() => setSaveMessage('Đã lưu đơn giá và chi phí điện.'))
+      .catch(() => setSaveMessage('Không lưu được đơn giá điện.'));
   };
 
   return (
@@ -91,6 +133,7 @@ export default function PowerDashboard() {
             Đơn giá: {tariffRate.toLocaleString('vi-VN')} đ/kWh
           </button>
         </header>
+        {saveMessage && <p role="status" className="-mt-4 text-xs text-slate-400">{saveMessage}</p>}
 
         <section aria-label="Tổng quan điện năng" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard
