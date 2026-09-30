@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bird, AlertTriangle, Thermometer, Droplets, Wind, Cpu, 
   CheckCircle, ShieldCheck, AlertCircle, Video, Maximize, 
@@ -59,19 +59,6 @@ function PageShell({ activePage, onNavigate, children }) {
   );
 }
 
-const initialChartData = [
-  { time: '14:20', temp: 28.1, humidity: 60, gas: 10 },
-  { time: '14:21', temp: 28.2, humidity: 61, gas: 11 },
-  { time: '14:22', temp: 28.4, humidity: 63, gas: 11 },
-  { time: '14:23', temp: 28.3, humidity: 62, gas: 12 },
-  { time: '14:24', temp: 28.5, humidity: 62, gas: 12 },
-  { time: '14:25', temp: 28.5, humidity: 63, gas: 11 },
-  { time: '14:26', temp: 28.6, humidity: 61, gas: 13 },
-  { time: '14:27', temp: 28.4, humidity: 62, gas: 12 },
-  { time: '14:28', temp: 28.5, humidity: 62, gas: 12 },
-  { time: '14:29', temp: 28.5, humidity: 62, gas: 12 }
-];
-
 const initialLogs = [
   {
     id: 1,
@@ -122,11 +109,14 @@ const initialLogs = [
 
 const videoStreamUrl = 'http://localhost:5000/api/video?source=0';
 const latestDataUrl = 'http://localhost:5000/api/latest-data';
+const sensorDataUrl = 'http://localhost:5000/api/sensor';
 
 export default function App() {
   const [time, setTime] = useState(new Date());
+  const lastSensorSampleId = useRef(null);
+  const lastSensorTimestamp = useRef(null);
   const [activePage, setActivePage] = useState('dashboard');
-  const [chartData, setChartData] = useState(initialChartData);
+  const [chartData, setChartData] = useState([]);
   const [logs, setLogs] = useState(initialLogs);
   const [automationRules, setAutomationRules] = useState(initialRules);
   const [flockData, setFlockData] = useState(null);
@@ -157,7 +147,7 @@ export default function App() {
   };
 
   // Sensors State
-  const [sensors, setSensors] = useState({ temp: 28.5, humidity: 62, gas: 12 });
+  const [sensors, setSensors] = useState(null);
   
   // Actuators State
   const [fanOn, setFanOn] = useState(false);
@@ -197,6 +187,60 @@ export default function App() {
     loadLatestData();
     const timer = setInterval(loadLatestData, 1000);
 
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSensorData = async () => {
+      try {
+        const after = lastSensorSampleId.current ?? -1;
+        const response = await fetch(`${sensorDataUrl}?after=${after}`);
+        if (!response.ok) {
+          throw new Error(`Sensor request failed: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (payload.fresh === false) return;
+        const data = payload.data;
+        if (!isMounted) return;
+
+        if (!payload.ready || !data || !Number.isFinite(data.timestamp) || !['temperature', 'humidity', 'gas'].every(
+          (key) => typeof data[key] === 'number' && Number.isFinite(data[key])
+        )) {
+          setSensors(null);
+          return;
+        }
+
+        if (!Number.isInteger(payload.sample_id) || payload.sample_id <= (lastSensorSampleId.current ?? -1)) {
+          return;
+        }
+
+        const nextSensors = {
+          temp: Number(data.temperature),
+          humidity: Number(data.humidity),
+          gas: Number(data.gas)
+        };
+        lastSensorSampleId.current = payload.sample_id;
+        setSensors(nextSensors);
+        setChartData((previous) => [
+          ...previous.slice(-9),
+          {
+            time: new Date(data.timestamp * 1000).toLocaleTimeString('vi-VN'),
+            ...nextSensors
+          }
+        ]);
+      } catch (error) {
+        if (isMounted) setSensors(null);
+      }
+    };
+
+    loadSensorData();
+    const timer = setInterval(loadSensorData, 500);
     return () => {
       isMounted = false;
       clearInterval(timer);
@@ -246,7 +290,7 @@ export default function App() {
   };
 
   const triggerGasAlert = () => {
-    setSensors({ ...sensors, gas: 48 });
+    setSensors((current) => ({ ...current, gas: 48 }));
     setHazard({
       type: 'GAS',
       title: 'CẢNH BÁO NGUY HIỂM KHẨN CẤP!',
@@ -260,13 +304,15 @@ export default function App() {
     );
     
     // Update chart
-    const newData = [...chartData];
-    newData[newData.length - 1] = { ...newData[newData.length - 1], gas: 48 };
-    setChartData(newData);
+    setChartData((current) => [...current.slice(-9), {
+      time: new Date().toLocaleTimeString('vi-VN'),
+      ...(sensors || {}),
+      gas: 48
+    }]);
   };
 
   const triggerHighTemp = () => {
-    setSensors({ ...sensors, temp: 35.8 });
+    setSensors((current) => ({ ...current, temp: 35.8 }));
     setHazard({
       type: 'TEMP',
       title: 'CẢNH BÁO QUÁ NHIỆT!',
@@ -280,17 +326,17 @@ export default function App() {
     );
 
     // Update chart
-    const newData = [...chartData];
-    newData[newData.length - 1] = { ...newData[newData.length - 1], temp: 35.8 };
-    setChartData(newData);
+    setChartData((current) => [...current.slice(-9), {
+      time: new Date().toLocaleTimeString('vi-VN'),
+      ...(sensors || {}),
+      temp: 35.8
+    }]);
   };
 
   const resetSimulations = () => {
-    setSensors({ temp: 28.5, humidity: 62, gas: 12 });
+    setSensors(null);
     setHazard(null);
-    const newData = [...chartData];
-    newData[newData.length - 1] = { ...newData[newData.length - 1], temp: 28.5, gas: 12 };
-    setChartData(newData);
+    setChartData([]);
   };
 
   const dismissHazard = () => setHazard(null);
@@ -397,7 +443,7 @@ export default function App() {
               <div>
                 <p className="text-xs font-medium text-slate-400">Nhiệt Độ Chuồng</p>
                 <h3 className="text-3xl font-bold mt-1 text-white">
-                  {sensors.temp}<span className="text-lg font-normal text-slate-400">°C</span>
+                  {sensors ? `${sensors.temp}°C` : '--'}
                 </h3>
               </div>
               <div className="p-3 bg-orange-500/10 text-orange-400 rounded-xl">
@@ -405,7 +451,9 @@ export default function App() {
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
-              {sensors.temp > 31 ? (
+              {!sensors ? (
+                <span className="text-slate-500 font-semibold mr-2">Chưa có dữ liệu</span>
+              ) : sensors.temp > 31 ? (
                 <span className="text-red-400 font-semibold flex items-center mr-2">
                   <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Quá nhiệt
                 </span>
@@ -414,7 +462,7 @@ export default function App() {
                   <CheckCircle className="w-3.5 h-3.5 mr-1" /> Lý tưởng
                 </span>
               )}
-              (Ngưỡng: 26°C - 31°C)
+              {sensors && '(Ngưỡng: 26°C - 31°C)'}
             </div>
           </div>
 
@@ -424,7 +472,7 @@ export default function App() {
               <div>
                 <p className="text-xs font-medium text-slate-400">Độ Ẩm Không Khí</p>
                 <h3 className="text-3xl font-bold mt-1 text-white">
-                  {sensors.humidity}<span className="text-lg font-normal text-slate-400">%</span>
+                  {sensors ? `${sensors.humidity}%` : '--'}
                 </h3>
               </div>
               <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl">
@@ -432,10 +480,14 @@ export default function App() {
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
-              <span className="text-emerald-400 font-semibold flex items-center mr-2">
-                <CheckCircle className="w-3.5 h-3.5 mr-1" /> Ổn định
-              </span>
-              (Ngưỡng: 55% - 70%)
+              {sensors ? (
+                <>
+                  <span className="text-emerald-400 font-semibold flex items-center mr-2">
+                    <CheckCircle className="w-3.5 h-3.5 mr-1" /> Ổn định
+                  </span>
+                  (Ngưỡng: 55% - 70%)
+                </>
+              ) : <span className="text-slate-500 font-semibold">Chưa có dữ liệu</span>}
             </div>
           </div>
 
@@ -445,15 +497,17 @@ export default function App() {
               <div>
                 <p className="text-xs font-medium text-slate-400">Khí Gas & Ammonia (NH3)</p>
                 <h3 className="text-3xl font-bold mt-1 text-white">
-                  {sensors.gas}<span className="text-lg font-normal text-slate-400"> PPM</span>
+                  {sensors ? `${sensors.gas} PPM` : '--'}
                 </h3>
               </div>
-              <div className={`p-3 rounded-xl ${sensors.gas > 25 ? 'bg-red-500/20 text-red-400 animate-bounce' : 'bg-emerald-500/10 text-emerald-400'}`}>
+              <div className={`p-3 rounded-xl ${sensors?.gas > 25 ? 'bg-red-500/20 text-red-400 animate-bounce' : 'bg-emerald-500/10 text-emerald-400'}`}>
                 <Wind className="w-6 h-6" />
               </div>
             </div>
             <div className="mt-3 flex items-center text-xs text-slate-400">
-              {sensors.gas > 25 ? (
+              {!sensors ? (
+                <span className="text-slate-500 font-semibold mr-2">Chưa có dữ liệu</span>
+              ) : sensors.gas > 25 ? (
                 <span className="text-red-400 font-bold flex items-center mr-2">
                   <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Báo Động!
                 </span>
@@ -462,7 +516,7 @@ export default function App() {
                   <ShieldCheck className="w-3.5 h-3.5 mr-1" /> An toàn
                 </span>
               )}
-              (Báo động &gt; 25 PPM)
+              {sensors && '(Báo động > 25 PPM)'}
             </div>
           </div>
 
@@ -556,10 +610,15 @@ export default function App() {
                 <LineChartIcon className="w-5 h-5 text-blue-400" />
                 <h2 className="font-bold text-slate-100">Biểu Đồ Thời Gian Thực</h2>
               </div>
-              <span className="text-xs text-slate-400">10 phút gần đây</span>
+              <span className="text-xs text-slate-400">10 mẫu gần nhất</span>
             </div>
 
             <div className="relative w-full h-64 mt-4">
+              {chartData.length === 0 && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-slate-500">
+                  Chưa có dữ liệu cảm biến
+                </div>
+              )}
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
