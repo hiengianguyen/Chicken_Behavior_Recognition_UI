@@ -155,7 +155,7 @@ export default function DeviceControls({
               {sortedRules.map((rule) => {
                 const condition = rule.type === 'SENSOR'
                   ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit}`
-                  : `${rule.time} · ${rule.days?.join(', ') || 'Mỗi ngày'}`;
+                  : `${rule.time}${rule.offTime && rule.targetAction === 'ON' ? ` → ${rule.offTime}` : ''} · ${rule.days?.join(', ') || 'Mỗi ngày'}`;
                 const RuleIcon = rule.type === 'SENSOR' ? Thermometer : CalendarClock;
                 return (
                   <div key={rule.id} className="grid grid-cols-1 gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center">

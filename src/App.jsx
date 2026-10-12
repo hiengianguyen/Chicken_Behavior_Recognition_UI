@@ -349,7 +349,9 @@ export default function App() {
     const conflictingDevices = new Set();
     const now = new Date();
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const currentDay = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][now.getDay()];
+    const daysOfWeek = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const currentDay = daysOfWeek[now.getDay()];
+    const previousDay = daysOfWeek[(now.getDay() + 6) % daysOfWeek.length];
     const updateConditionState = (rule, conditionMet, previouslyMet) => {
       automationConditionStatesRef.current.set(rule.id, conditionMet);
       if (previouslyMet === conditionMet) return;
@@ -372,6 +374,7 @@ export default function App() {
       }
 
       let conditionMet = false;
+      let scheduledOff = false;
       if (rule.type === 'SENSOR') {
         const field = sensorFields[rule.sensorType];
         const comparator = compare[rule.operator];
@@ -379,7 +382,12 @@ export default function App() {
         if (!field || !comparator || !Number.isFinite(threshold) || !Number.isFinite(sensors?.[field])) return;
         conditionMet = comparator(sensors[field], threshold);
       } else if (rule.type === 'SCHEDULE') {
-        conditionMet = rule.time === currentTime && (rule.days || []).includes(currentDay);
+        const scheduledDays = rule.days || [];
+        conditionMet = rule.time === currentTime && scheduledDays.includes(currentDay);
+        if (rule.targetAction === 'ON' && rule.offTime) {
+          const offDay = rule.offTime > rule.time ? currentDay : previousDay;
+          scheduledOff = rule.offTime === currentTime && scheduledDays.includes(offDay);
+        }
       } else {
         return;
       }
@@ -389,10 +397,12 @@ export default function App() {
         triggeredRules.push(rule);
       }
 
-      if (rule.type === 'SCHEDULE' && !conditionMet) return;
-      const targetEnabled = conditionMet
-        ? rule.targetAction === 'ON'
-        : rule.targetAction !== 'ON';
+      if (rule.type === 'SCHEDULE' && !conditionMet && !scheduledOff) return;
+      const targetEnabled = scheduledOff
+        ? false
+        : conditionMet
+          ? rule.targetAction === 'ON'
+          : rule.targetAction !== 'ON';
       const deviceId = rule.targetDeviceId;
       if (desiredStates.has(deviceId) && desiredStates.get(deviceId) !== targetEnabled) {
         conflictingDevices.add(deviceId);
@@ -407,7 +417,7 @@ export default function App() {
       const sensorField = sensorFields[rule.sensorType];
       const condition = rule.type === 'SENSOR'
         ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit || ''}`.trim()
-        : `${rule.time} · ${(rule.days || []).join(', ')}`;
+        : `${rule.time}${rule.offTime && rule.targetAction === 'ON' ? ` → ${rule.offTime}` : ''} · ${(rule.days || []).join(', ')}`;
       const timestamp = new Date().toLocaleString('vi-VN');
       const notificationId = `AUTO-${rule.id}-${Date.now()}`;
       const notification = {
