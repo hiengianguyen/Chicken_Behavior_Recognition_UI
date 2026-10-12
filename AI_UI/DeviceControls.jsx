@@ -6,6 +6,13 @@ import {
 import { DEVICE_NAMES } from './deviceCatalog';
 import { saveRecord } from '../src/api.js';
 
+const FEED_DURATION_OPTIONS = [
+  { seconds: 10, amountKg: 1 },
+  { seconds: 20, amountKg: 2 },
+  { seconds: 30, amountKg: 3 },
+  { seconds: 60, amountKg: 6 }
+];
+
 export default function DeviceControls({
   rules,
   fanOn,
@@ -19,12 +26,16 @@ export default function DeviceControls({
   lightOn,
   setLightOn,
   feederOn,
-  setFeederOn,
   onDispenseFeed,
+  onStopDispenseFeed,
+  feedDispensing,
+  feedMessage,
   onNavigate
 }) {
   const sortedRules = [...rules].sort((first, second) => Number(second.enabled) - Number(first.enabled));
   const [saveMessage, setSaveMessage] = React.useState('');
+  const [selectedFeedDuration, setSelectedFeedDuration] = React.useState('');
+  const [feedSelectionError, setFeedSelectionError] = React.useState('');
 
   const persistDevice = async (record) => {
     try {
@@ -58,7 +69,7 @@ export default function DeviceControls({
             accent="cyan"
             enabled={fanOn}
             onChange={setFanOn}
-            stateText={fanOn ? 'Đang bật · 100%' : 'Đang tắt'}
+            stateText={fanOn ? 'Đang bật' : 'Đang tắt'}
             detail="Điều khiển thủ công hoặc theo luật cảm biến"
             deviceIds={['FAN_01']}
             rules={rules}
@@ -71,7 +82,7 @@ export default function DeviceControls({
             accent="blue"
             enabled={windowOpen}
             onChange={setWindowOpen}
-            stateText={windowOpen ? 'Đang mở · 75%' : 'Đang đóng'}
+            stateText={windowOpen ? 'Đang mở' : 'Đang đóng'}
             detail="Điều khiển thủ công hoặc theo lịch trình"
             deviceIds={['WINDOW_01']}
             rules={rules}
@@ -118,24 +129,36 @@ export default function DeviceControls({
           />
           <DeviceCard
             title="Máng cho ăn tự động"
-            subtitle="Sức chứa cám: 82%"
+            subtitle="Xả cám theo thời lượng"
             icon={Utensils}
             accent="amber"
             enabled={feederOn}
-            onChange={setFeederOn}
             stateText={feederOn ? 'Đang bật' : 'Đang tắt'}
             detail="Điều khiển theo lịch hoặc quy tắc tự động"
             deviceIds={['FEEDER_01']}
             rules={rules}
             onPersist={persistDevice}
-            onAction={() => {
-              onDispenseFeed();
-              persistDevice({
-                id: 'FEEDER_01', deviceId: 'FEEDER_01', name: 'Máng cho ăn tự động', category: 'Cho ăn',
-                enabled: true, feedCapacityPercent: 82, lastDispensedAmountKg: 10,
-                nextSchedule: '16:30'
-              });
+            actionOptions={FEED_DURATION_OPTIONS}
+            selectedActionValue={selectedFeedDuration}
+            onActionSelect={(value) => {
+              setSelectedFeedDuration(value);
+              setFeedSelectionError('');
             }}
+            actionDisabled={feedDispensing}
+            onToggle={(nextEnabled) => {
+              if (nextEnabled) {
+                const option = FEED_DURATION_OPTIONS.find(({ seconds }) => String(seconds) === selectedFeedDuration);
+                if (!option) {
+                  setFeedSelectionError('Vui lòng chọn thời lượng trước khi bật xả cám.');
+                  return;
+                }
+                onDispenseFeed(option.seconds, option.amountKg);
+                return;
+              }
+
+              onStopDispenseFeed();
+            }}
+            actionStatus={feedSelectionError || feedMessage}
           />
         </section>
         {saveMessage && <p role="status" className="-mt-4 text-xs text-slate-400">{saveMessage}</p>}
@@ -186,7 +209,7 @@ export default function DeviceControls({
   );
 }
 
-function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, stateText, detail, deviceIds, rules, onPersist, onAction }) {
+function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, onToggle, stateText, detail, deviceIds, rules, onPersist, actionOptions, selectedActionValue, onActionSelect, actionDisabled, actionStatus }) {
   const accents = {
     cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300',
     blue: 'border-blue-500/20 bg-blue-500/10 text-blue-300',
@@ -208,6 +231,10 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, st
         <label className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center" title={`Bật/tắt ${title}`}>
           <input type="checkbox" className="peer sr-only" checked={enabled} onChange={(event) => {
             const nextEnabled = event.target.checked;
+            if (onToggle) {
+              onToggle(nextEnabled);
+              return;
+            }
             onChange(nextEnabled);
             onPersist({
               id: deviceIds[0], deviceId: deviceIds[0], name: title, category: subtitle,
@@ -220,10 +247,28 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, st
           <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
         </label>
       </div>
-      {onAction && (
-        <button type="button" onClick={onAction} className="mt-4 inline-flex min-h-9 items-center gap-2 self-start rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-500">
-          <Utensils className="h-3.5 w-3.5" /> Xả cám
-        </button>
+      {actionOptions && (
+        <div className="mt-4 space-y-2">
+          <label htmlFor="feed-duration" className="block text-xs font-semibold text-slate-300">Thời lượng xả cám</label>
+          <select
+            id="feed-duration"
+            value={selectedActionValue}
+            disabled={actionDisabled}
+            onChange={(event) => {
+              onActionSelect(event.target.value);
+            }}
+            className="min-h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="" disabled>{actionDisabled ? 'Đang xả cám...' : 'Chọn thời lượng xả cám'}</option>
+            {actionOptions.map(({ seconds, amountKg }) => (
+              <option key={seconds} value={seconds}>
+                {seconds} giây (ước tính {amountKg} kg)
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-slate-500">Ước tính theo 0,1 kg/giây; lượng thực tế có thể chênh lệch.</p>
+          {actionStatus && <p role="status" className="text-xs text-amber-300">{actionStatus}</p>}
+        </div>
       )}
       <div className="mt-5 space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
         <div className="flex items-center justify-between gap-3 text-xs">
