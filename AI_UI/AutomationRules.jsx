@@ -9,7 +9,7 @@ const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
 const emptyForm = () => ({
   name: '', type: 'SENSOR', sensorType: 'TEMP', operator: '>',
-  thresholdValue: '30', time: '08:00', days: [...weekdays],
+  thresholdValue: '30', time: '08:00', offTime: '20:00', days: [...weekdays],
   targetDeviceId: 'FAN_01', targetAction: 'ON', sendNotification: true
 });
 
@@ -243,6 +243,23 @@ export default function AutomationRules({ rules, setRules }) {
                   <Field label="Giờ kích hoạt">
                     <input required type="time" value={form.time} onChange={(event) => updateForm('time', event.target.value)} className={inputClass} />
                   </Field>
+                  <Field label="Giờ tắt thiết bị">
+                    <input
+                      required
+                      type="time"
+                      value={form.offTime}
+                      disabled={form.targetAction !== 'ON'}
+                      onChange={(event) => updateForm('offTime', event.target.value)}
+                      className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-50`}
+                    />
+                    {form.targetAction === 'ON' ? (
+                      <span className="block text-[11px] font-normal text-slate-500">
+                        {form.time === form.offTime ? 'Giờ tắt phải khác giờ kích hoạt.' : 'Thiết bị sẽ tự tắt vào giờ này.'}
+                      </span>
+                    ) : (
+                      <span className="block text-[11px] font-normal text-slate-500">Chỉ áp dụng khi hành động là bật thiết bị.</span>
+                    )}
+                  </Field>
                   <Field label="Ngày áp dụng">
                     <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
                       {weekdays.map((day) => {
@@ -285,7 +302,13 @@ export default function AutomationRules({ rules, setRules }) {
 
               <div className="flex justify-end gap-2 border-t border-slate-700/60 pt-4">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="min-h-10 rounded-xl px-4 text-sm text-slate-300 transition hover:bg-slate-800">Hủy</button>
-                <button type="submit" disabled={form.type === 'SCHEDULE' && form.days.length === 0} className="min-h-10 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+                <button
+                  type="submit"
+                  disabled={form.type === 'SCHEDULE' && (
+                    form.days.length === 0 || (form.targetAction === 'ON' && form.time === form.offTime)
+                  )}
+                  className="min-h-10 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   {editingId ? 'Lưu thay đổi' : 'Tạo quy tắc'}
                 </button>
               </div>
@@ -326,7 +349,7 @@ function RuleCard({ rule, onToggle, onEdit, onDelete }) {
   const isSensorRule = rule.type === 'SENSOR';
   const condition = isSensorRule
     ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit}`
-    : `${rule.time} · ${rule.days?.join(', ') || 'Mỗi ngày'}`;
+    : `${rule.time}${rule.offTime && rule.targetAction === 'ON' ? ` → ${rule.offTime}` : ''} · ${rule.days?.join(', ') || 'Mỗi ngày'}`;
 
   return (
     <article className={`rounded-2xl border bg-[#1e293b] p-5 shadow-lg transition ${rule.enabled ? 'border-slate-700/60' : 'border-slate-800 opacity-75'}`}>
