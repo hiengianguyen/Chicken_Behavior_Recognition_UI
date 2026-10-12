@@ -180,7 +180,10 @@ export default function App() {
   const [mistOn, setMistOn] = useState(false);
   const [lightOn, setLightOn] = useState(false);
   const [feederOn, setFeederOn] = useState(false);
+  const [feedDispensing, setFeedDispensing] = useState(false);
   const [feedMessage, setFeedMessage] = useState(null);
+  const feedTimerRef = useRef(null);
+  const feedSaveQueueRef = useRef(Promise.resolve());
   
   // Hazard State
   const [hazard, setHazard] = useState(null);
@@ -489,6 +492,8 @@ export default function App() {
     }
   }, [feedMessage]);
 
+  useEffect(() => () => clearTimeout(feedTimerRef.current), []);
+
   const addLog = (type, location, severity, severityBg, action, status, statusColor) => {
     const notification = {
       id: `SIM-${Date.now()}`,
@@ -559,15 +564,62 @@ export default function App() {
 
   const dismissHazard = () => setHazard(null);
   
-  const dispenseFeed = () => {
+  const persistFeederState = (enabled, extra = {}) => {
+    const existingRecord = deviceRecordsRef.current.get('FEEDER_01') || {};
+    const nextRecord = {
+      ...existingRecord,
+      ...extra,
+      id: 'FEEDER_01',
+      deviceId: 'FEEDER_01',
+      name: 'Máng cho ăn tự động',
+      category: 'Cho ăn',
+      enabled,
+      updatedAt: new Date().toISOString()
+    };
+    deviceRecordsRef.current.set('FEEDER_01', nextRecord);
+
+    const save = feedSaveQueueRef.current.then(async () => {
+      await saveRecord('devices', 'FEEDER_01', nextRecord);
+      setDevices((current) => [
+        ...current.filter((device) => (device.deviceId || device.id) !== 'FEEDER_01'),
+        nextRecord
+      ]);
+    }).catch((error) => {
+      setFeedMessage(`Không lưu được trạng thái máng cám vào Firestore: ${error.message}`);
+    });
+    feedSaveQueueRef.current = save;
+    return save;
+  };
+
+  const stopFeedDispensing = (completionMessage = 'Đã dừng xả cám.') => {
+    clearTimeout(feedTimerRef.current);
+    feedTimerRef.current = null;
+    handleManualDeviceChange('FEEDER_01', false);
+    setFeedDispensing(false);
+    setFeedMessage(completionMessage);
+    persistFeederState(false);
+  };
+
+  const dispenseFeed = (durationSeconds, estimatedAmountKg) => {
+    clearTimeout(feedTimerRef.current);
     handleManualDeviceChange('FEEDER_01', true);
-    setFeedMessage('🔔 Đã kích hoạt mô-tơ xả cám! Đang cung cấp 10kg thức ăn vào máng.');
+    setFeedDispensing(true);
+    setFeedMessage(`Đang xả cám trong ${durationSeconds} giây (ước tính ${estimatedAmountKg} kg).`);
+    persistFeederState(true, {
+      feedCapacityPercent: 82,
+      lastDispensedAmountKg: estimatedAmountKg,
+      lastDispenseDurationSeconds: durationSeconds,
+      nextSchedule: '16:30'
+    });
     setInfoModal({
       isOpen: true,
       title: 'Hệ Thống Cho Ăn Tự Động',
-      message: '🔔 Đã kích hoạt mô-tơ xả cám thành công! Đang cung cấp 10kg thức ăn vào máng cho đàn gà.',
+      message: `Đang xả cám trong ${durationSeconds} giây, ước tính khoảng ${estimatedAmountKg} kg. Mô-tơ sẽ tự tắt khi hết thời gian.`,
       type: 'success'
     });
+    feedTimerRef.current = setTimeout(() => {
+      stopFeedDispensing(`Đã xả cám xong (ước tính ${estimatedAmountKg} kg).`);
+    }, durationSeconds * 1000);
   };
 
   const normalizeBehavior = (behavior) => String(behavior ?? '').trim().toLocaleLowerCase('vi');
@@ -626,7 +678,7 @@ export default function App() {
   }
   if (activePage === 'devices') {
     return <PageShell activePage={activePage} onNavigate={setActivePage}>
-      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={(enabled) => handleManualDeviceChange('FAN_01', enabled)} windowOpen={windowOpen} setWindowOpen={(enabled) => handleManualDeviceChange('WINDOW_01', enabled)} heaterOn={heaterOn} setHeaterOn={(enabled) => handleManualDeviceChange('HEATER_01', enabled)} mistOn={mistOn} setMistOn={(enabled) => handleManualDeviceChange('MIST_01', enabled)} lightOn={lightOn} setLightOn={(enabled) => handleManualDeviceChange('LIGHT_01', enabled)} feederOn={feederOn} setFeederOn={(enabled) => handleManualDeviceChange('FEEDER_01', enabled)} onDispenseFeed={dispenseFeed} feedMessage={feedMessage} onNavigate={setActivePage} />
+      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={(enabled) => handleManualDeviceChange('FAN_01', enabled)} windowOpen={windowOpen} setWindowOpen={(enabled) => handleManualDeviceChange('WINDOW_01', enabled)} heaterOn={heaterOn} setHeaterOn={(enabled) => handleManualDeviceChange('HEATER_01', enabled)} mistOn={mistOn} setMistOn={(enabled) => handleManualDeviceChange('MIST_01', enabled)} lightOn={lightOn} setLightOn={(enabled) => handleManualDeviceChange('LIGHT_01', enabled)} feederOn={feederOn} onDispenseFeed={dispenseFeed} onStopDispenseFeed={stopFeedDispensing} feedDispensing={feedDispensing} feedMessage={feedMessage} onNavigate={setActivePage} />
     </PageShell>;
   }
   if (activePage === 'ai-analysis') {
