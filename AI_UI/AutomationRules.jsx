@@ -10,7 +10,8 @@ const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const emptyForm = () => ({
   name: '', type: 'SENSOR', sensorType: 'TEMP', operator: '>',
   thresholdValue: '30', time: '08:00', offTime: '20:00', days: [...weekdays],
-  targetDeviceId: 'FAN_01', targetAction: 'ON', sendNotification: true
+  targetDeviceId: 'FAN_01', targetAction: 'ON', targetPositionPercent: 100,
+  offSensorType: 'TEMP', offOperator: '<', offThresholdValue: '28', sendNotification: true
 });
 
 const sensorUnits = { TEMP: '°C', HUM: '%', NH3: 'ppm', CO2: 'ppm' };
@@ -50,6 +51,8 @@ export default function AutomationRules({ rules, setRules }) {
       ...emptyForm(),
       ...rule,
       thresholdValue: String(rule.thresholdValue ?? 30),
+      offThresholdValue: String(rule.offThresholdValue ?? 28),
+      targetPositionPercent: Number(rule.targetPositionPercent ?? 100),
       days: rule.days ? [...rule.days] : [...weekdays]
     });
     setEditingId(rule.id);
@@ -66,6 +69,8 @@ export default function AutomationRules({ rules, setRules }) {
         ...rules.find((rule) => rule.id === editingId),
         ...form,
         thresholdValue: Number(form.thresholdValue),
+        offThresholdValue: Number(form.offThresholdValue),
+        targetPositionPercent: Number(form.targetPositionPercent),
         unit
       };
       setRules((current) => current.map((rule) => rule.id === editingId ? savedRule : rule));
@@ -76,6 +81,8 @@ export default function AutomationRules({ rules, setRules }) {
         name: form.name.trim(),
         enabled: true,
         thresholdValue: Number(form.thresholdValue),
+        offThresholdValue: Number(form.offThresholdValue),
+        targetPositionPercent: Number(form.targetPositionPercent),
         unit,
         lastTriggered: 'Chưa kích hoạt',
         triggerCount: 0
@@ -295,6 +302,54 @@ export default function AutomationRules({ rules, setRules }) {
                 </Field>
               </div>
 
+              {form.targetDeviceId === 'WINDOW_01' && form.targetAction === 'ON' && (
+                <Field label={`Độ mở cửa gió khi bật: ${form.targetPositionPercent}%`}>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    step="5"
+                    value={form.targetPositionPercent}
+                    onChange={(event) => updateForm('targetPositionPercent', Number(event.target.value))}
+                    className="h-2 w-full cursor-pointer accent-emerald-500"
+                    aria-label="Độ mở cửa gió khi bật, phần trăm"
+                  />
+                </Field>
+              )}
+
+              {form.targetDeviceId === 'WINDOW_01' && form.targetAction === 'ON' && form.type === 'SENSOR' && (
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:grid-cols-3">
+                  <p className="text-xs font-semibold text-amber-200 sm:col-span-3">Điều kiện tự đóng cửa</p>
+                  <Field label="Cảm biến tắt">
+                    <select value={form.offSensorType} onChange={(event) => updateForm('offSensorType', event.target.value)} className={inputClass}>
+                      <option value="TEMP">Nhiệt độ</option>
+                      <option value="HUM">Độ ẩm</option>
+                      <option value="NH3">Khí NH3</option>
+                    </select>
+                  </Field>
+                  <Field label="Điều kiện tắt">
+                    <select value={form.offOperator} onChange={(event) => updateForm('offOperator', event.target.value)} className={inputClass}>
+                      <option value=">">Lớn hơn (&gt;)</option>
+                      <option value="<">Nhỏ hơn (&lt;)</option>
+                      <option value=">=">Lớn hơn hoặc bằng</option>
+                      <option value="<=">Nhỏ hơn hoặc bằng</option>
+                    </select>
+                  </Field>
+                  <Field label={`Ngưỡng tắt (${sensorUnits[form.offSensorType]})`}>
+                    <input required type="number" step="0.1" value={form.offThresholdValue} onChange={(event) => updateForm('offThresholdValue', event.target.value)} className={inputClass} />
+                  </Field>
+                  <p className="text-[11px] leading-relaxed text-slate-400 sm:col-span-3">
+                    Ví dụ: mở khi nhiệt độ &gt; 30°C, đóng khi nhiệt độ &lt; 28°C. Cửa giữ nguyên vị trí nếu chưa thỏa điều kiện mở hoặc tắt.
+                  </p>
+                </div>
+              )}
+
+              {form.targetDeviceId === 'WINDOW_01' && form.targetAction === 'ON' && form.type === 'SCHEDULE' && (
+                <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-200">
+                  Cửa sẽ tự đóng vào “Giờ tắt thiết bị” đã đặt ở phần lịch trình.
+                </p>
+              )}
+
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
                 <input type="checkbox" checked={form.sendNotification} onChange={(event) => updateForm('sendNotification', event.target.checked)} className="h-4 w-4 accent-emerald-500" />
                 Gửi thông báo khi quy tắc được kích hoạt
@@ -350,6 +405,14 @@ function RuleCard({ rule, onToggle, onEdit, onDelete }) {
   const condition = isSensorRule
     ? `${rule.sensorType} ${rule.operator} ${rule.thresholdValue} ${rule.unit}`
     : `${rule.time}${rule.offTime && rule.targetAction === 'ON' ? ` → ${rule.offTime}` : ''} · ${rule.days?.join(', ') || 'Mỗi ngày'}`;
+  const offCondition = rule.targetDeviceId === 'WINDOW_01'
+    && rule.targetAction === 'ON'
+    && isSensorRule
+    && rule.offSensorType
+    && rule.offOperator
+    && Number.isFinite(Number(rule.offThresholdValue))
+    ? `${rule.offSensorType} ${rule.offOperator} ${rule.offThresholdValue} ${sensorUnits[rule.offSensorType] || ''}`.trim()
+    : null;
 
   return (
     <article className={`rounded-2xl border bg-[#1e293b] p-5 shadow-lg transition ${rule.enabled ? 'border-slate-700/60' : 'border-slate-800 opacity-75'}`}>
@@ -380,12 +443,14 @@ function RuleCard({ rule, onToggle, onEdit, onDelete }) {
         <div className="rounded-xl border border-slate-700/50 bg-slate-950/50 p-3">
           <p className="text-[10px] font-semibold uppercase text-slate-500">Điều kiện</p>
           <p className={`mt-1.5 text-sm font-semibold ${isSensorRule ? 'text-cyan-300' : 'text-blue-300'}`}>{condition}</p>
+          {offCondition && <p className="mt-1 text-xs font-medium text-amber-300">Tắt cửa: {offCondition}</p>}
         </div>
         <div className="rounded-xl border border-slate-700/50 bg-slate-950/50 p-3">
           <p className="text-[10px] font-semibold uppercase text-slate-500">Hành động</p>
           <p className="mt-1.5 truncate text-sm font-medium text-slate-200" title={device?.name}>{device?.name || rule.targetDeviceId}</p>
           <p className={`mt-0.5 text-xs font-semibold ${rule.targetAction === 'ON' ? 'text-emerald-300' : 'text-rose-300'}`}>
             {rule.targetAction === 'ON' ? 'Bật thiết bị' : 'Tắt thiết bị'}
+            {rule.targetDeviceId === 'WINDOW_01' && rule.targetAction === 'ON' && ` · Mở ${Number(rule.targetPositionPercent ?? 100)}%`}
             {rule.sendNotification && <span className="ml-2 inline-flex items-center gap-1 font-normal text-slate-500"><Bell className="h-3 w-3" /> Có thông báo</span>}
           </p>
         </div>

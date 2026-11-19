@@ -16,13 +16,13 @@ function getChickenStats(flockData) {
     return { total: flockData?.total_tracks ?? null, normal: null, standing: null, separated: null };
   }
 
-  const normalCount = chickens.filter((chicken) => normalizeBehavior(chicken.behavior) === 'normal').length;
   const standingCount = chickens.filter((chicken) => normalizeBehavior(chicken.behavior) === 'standing').length;
   const separatedCount = chickens.filter((chicken) => separatedBehaviors.has(normalizeBehavior(chicken.behavior))).length;
+  const totalCount = flockData.total_tracks ?? chickens.length;
 
   return {
-    total: flockData.total_tracks ?? chickens.length,
-    normal: normalCount,
+    total: totalCount,
+    normal: Math.max(totalCount - standingCount, 0),
     standing: standingCount,
     separated: separatedCount
   };
@@ -79,6 +79,11 @@ export default function AIChickenAnalysis({ videoStreamUrl, flockData, inference
 
           <div className="relative aspect-video overflow-hidden rounded-xl border border-slate-700 bg-slate-950">
             <img src={videoStreamUrl} alt="Luồng camera chuồng gà được AI phân tích" className="absolute inset-0 h-full w-full object-contain" />
+            {(!inferenceStatus?.has_frame || !inferenceStatus?.running) && (
+              <div className="absolute inset-x-3 top-3 z-10 rounded-lg border border-slate-700 bg-slate-950/90 px-3 py-2 text-xs text-slate-200" role={inferenceStatus?.last_error ? 'alert' : 'status'}>
+                {inferenceStatus?.last_error || (inferenceStatus?.has_frame ? 'Luồng camera đã dừng.' : 'Đang khởi tạo camera và mô hình AI...')}
+              </div>
+            )}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-slate-950/20" />
             <span className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-medium text-slate-300">
               <span className="h-2 w-2 rounded-full bg-rose-400" /> Camera 01
@@ -157,7 +162,14 @@ export default function AIChickenAnalysis({ videoStreamUrl, flockData, inference
               <button type="button" onClick={closeExpanded} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Đóng</button>
             </header>
             <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-slate-950 p-3">
-              <img src={videoStreamUrl} alt="Luồng camera chuồng gà được AI phân tích" className="max-h-[75vh] max-w-full object-contain transition-transform duration-200" style={{ transform: `scale(${zoom})` }} />
+              <div className="relative flex max-h-[75vh] min-h-0 w-full items-center justify-center">
+                <img src={videoStreamUrl} alt="Luồng camera chuồng gà được AI phân tích" className="max-h-[75vh] max-w-full object-contain transition-transform duration-200" style={{ transform: `scale(${zoom})` }} />
+                {(!inferenceStatus?.has_frame || !inferenceStatus?.running) && (
+                  <div className="absolute inset-x-3 top-3 rounded-lg border border-slate-700 bg-slate-950/90 px-3 py-2 text-xs text-slate-200" role={inferenceStatus?.last_error ? 'alert' : 'status'}>
+                    {inferenceStatus?.last_error || (inferenceStatus?.has_frame ? 'Luồng camera đã dừng.' : 'Đang khởi tạo camera và mô hình AI...')}
+                  </div>
+                )}
+              </div>
             </div>
             <footer className="flex items-center justify-between gap-3 border-t border-slate-700/60 px-4 py-3 text-xs text-slate-400 sm:px-5">
               <span>{inferenceStatus?.running ? 'AI đang nhận diện' : 'AI đang dừng'}</span>

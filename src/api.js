@@ -1,4 +1,7 @@
-const API_ROOT = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/$/, '');
+export const API_ROOT = (
+  import.meta.env.VITE_API_BASE_URL
+  || `http://${window.location.hostname || 'localhost'}:5000/api`
+).replace(/\/$/, '');
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_ROOT}${path}`, {
@@ -22,6 +25,10 @@ export async function fetchCollection(collection) {
 
 export function fetchLatestSensor() {
   return requestJson('/sensor?after=-1');
+}
+
+export function silenceFireAlarm() {
+  return requestJson('/fire-alarm/silence', { method: 'POST' });
 }
 
 export function saveRecord(collection, id, record) {

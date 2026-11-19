@@ -3,7 +3,7 @@ import {
   Bird, AlertTriangle, Thermometer, Droplets, Wind, Cpu, 
   CheckCircle, ShieldCheck, AlertCircle, Video, Maximize, 
   LineChart as LineChartIcon, Bell, UserMinus, CheckCircle2, Sliders,
-  X, ZoomIn, ZoomOut, RotateCcw, Power, LayoutDashboard, Eye, Zap, Workflow
+  X, ZoomIn, ZoomOut, RotateCcw, Power, LayoutDashboard, Eye, Zap, Workflow, Flame
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
@@ -14,7 +14,7 @@ import AutomationRules from '../AI_UI/AutomationRules.jsx';
 import DeviceControls from '../AI_UI/DeviceControls.jsx';
 import AIChickenAnalysis from '../AI_UI/AIChickenAnalysis.jsx';
 import { DEVICE_CATALOG } from '../AI_UI/deviceCatalog.js';
-import { fetchCollection, saveRecord } from './api.js';
+import { API_ROOT, fetchCollection, saveRecord, silenceFireAlarm } from './api.js';
 
 const emptySensorThresholdDraft = {
   tempMin: '',
@@ -105,13 +105,17 @@ function PageShell({ activePage, onNavigate, children }) {
   );
 }
 
-const videoStreamUrl = 'http://localhost:5000/api/video?source=0';
-const latestDataUrl = 'http://localhost:5000/api/latest-data';
-const sensorDataUrl = 'http://localhost:5000/api/sensor';
+const videoSource = import.meta.env.VITE_VIDEO_SOURCE || '0';
+const videoStreamUrl = `${API_ROOT}/video?source=${encodeURIComponent(videoSource)}`;
+const latestDataUrl = `${API_ROOT}/latest-data`;
+const inferenceStatusUrl = `${API_ROOT}/status`;
+const sensorDataUrl = `${API_ROOT}/sensor`;
 
 export default function App() {
   const [time, setTime] = useState(new Date());
   const lastSensorSampleId = useRef(null);
+  const fireDetectedRef = useRef(false);
+  const fireAlarmSilencePendingRef = useRef(false);
   const deviceRecordsRef = useRef(new Map());
   const pendingAutomationRef = useRef(new Map());
   const automationConditionStatesRef = useRef(new Map());
@@ -120,6 +124,11 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [automationRules, setAutomationRules] = useState([]);
   const [flockData, setFlockData] = useState(null);
+  const [inferenceStatus, setInferenceStatus] = useState({
+    running: false,
+    has_frame: false,
+    last_error: null
+  });
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   
   // Camera Modal & Zoom State
@@ -150,7 +159,7 @@ export default function App() {
   const setDeviceState = (deviceId, enabled) => {
     const stateSetters = {
       FAN_01: setFanOn,
-      WINDOW_01: setWindowOpen,
+      WINDOW_01: (isEnabled) => setWindowPercent(isEnabled ? 100 : 0),
       HEATER_01: setHeaterOn,
       MIST_01: setMistOn,
       LIGHT_01: setLightOn,
@@ -165,8 +174,30 @@ export default function App() {
     deviceRecordsRef.current.set(deviceId, { ...existingRecord, id: deviceId, deviceId, enabled });
   };
 
+  const handleWindowPositionChange = (power) => {
+    setWindowPercent(power);
+    const existingRecord = deviceRecordsRef.current.get('WINDOW_01') || {};
+    const nextRecord = {
+      ...existingRecord,
+      id: 'WINDOW_01',
+      deviceId: 'WINDOW_01',
+      enabled: power > 0,
+      power,
+      positionPercent: power,
+      updatedAt: new Date().toISOString(),
+      controlSource: 'manual'
+    };
+    deviceRecordsRef.current.set('WINDOW_01', nextRecord);
+    return nextRecord;
+  };
+
   // Sensors State
   const [sensors, setSensors] = useState(null);
+  const [fireDetected, setFireDetected] = useState(null);
+  const [fireAlarmSilenced, setFireAlarmSilenced] = useState(false);
+  const [fireAlarmActive, setFireAlarmActive] = useState(false);
+  const [fireAlarmSilencePending, setFireAlarmSilencePending] = useState(false);
+  const [fireAlarmSilenceError, setFireAlarmSilenceError] = useState('');
   const [devices, setDevices] = useState([]);
   const [sensorThresholds, setSensorThresholds] = useState(null);
   const [thresholdDraft, setThresholdDraft] = useState(emptySensorThresholdDraft);
@@ -175,7 +206,7 @@ export default function App() {
   
   // Actuators State
   const [fanOn, setFanOn] = useState(false);
-  const [windowOpen, setWindowOpen] = useState(true);
+  const [windowPercent, setWindowPercent] = useState(0);
   const [heaterOn, setHeaterOn] = useState(false);
   const [mistOn, setMistOn] = useState(false);
   const [lightOn, setLightOn] = useState(false);
@@ -217,6 +248,36 @@ export default function App() {
     loadLatestData();
     const timer = setInterval(loadLatestData, 1000);
 
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadInferenceStatus = async () => {
+      try {
+        const response = await fetch(inferenceStatusUrl);
+        if (!response.ok) {
+          throw new Error(`Trạng thái camera trả về HTTP ${response.status}`);
+        }
+        const status = await response.json();
+        if (isMounted) setInferenceStatus(status);
+      } catch (error) {
+        if (isMounted) {
+          setInferenceStatus({
+            running: false,
+            has_frame: false,
+            last_error: `Không kết nối được API camera: ${error.message}`
+          });
+        }
+      }
+    };
+
+    loadInferenceStatus();
+    const timer = setInterval(loadInferenceStatus, 1000);
     return () => {
       isMounted = false;
       clearInterval(timer);
@@ -277,14 +338,39 @@ export default function App() {
         const data = payload.data;
         if (!isMounted) return;
 
-        if (!payload.ready || !data || !Number.isFinite(data.timestamp) || !['temperature', 'humidity', 'gas'].every(
-          (key) => typeof data[key] === 'number' && Number.isFinite(data[key])
-        )) {
+        if (!payload.ready || !data) {
           setSensors(null);
+          setFireDetected(null);
           return;
         }
 
         if (!Number.isInteger(payload.sample_id) || payload.sample_id <= (lastSensorSampleId.current ?? -1)) {
+          return;
+        }
+
+        lastSensorSampleId.current = payload.sample_id;
+        if (typeof data.fire_detected === 'boolean') {
+          setFireDetected(data.fire_detected);
+        }
+        if (typeof data.fire_alarm_silenced === 'boolean') {
+          if (data.fire_alarm_silenced) {
+            fireAlarmSilencePendingRef.current = false;
+            setFireAlarmSilenced(true);
+            setFireAlarmSilencePending(false);
+          } else if (!fireAlarmSilencePendingRef.current) {
+            setFireAlarmSilenced(false);
+          }
+        }
+        setFireAlarmActive(
+          typeof data.fire_alarm_active === 'boolean'
+            ? data.fire_alarm_active
+            : data.fire_detected === true && data.fire_alarm_silenced !== true
+        );
+
+        if (!Number.isFinite(data.timestamp) || !['temperature', 'humidity', 'gas'].every(
+          (key) => typeof data[key] === 'number' && Number.isFinite(data[key])
+        )) {
+          setSensors(null);
           return;
         }
 
@@ -293,7 +379,6 @@ export default function App() {
           humidity: Number(data.humidity),
           gas: Number(data.gas)
         };
-        lastSensorSampleId.current = payload.sample_id;
         setSensors(nextSensors);
         setChartData((previous) => [
           ...previous.slice(-9),
@@ -303,7 +388,14 @@ export default function App() {
           }
         ]);
       } catch (error) {
-        if (isMounted) setSensors(null);
+        if (isMounted) {
+          setSensors(null);
+          setFireDetected(null);
+          setFireAlarmSilenced(false);
+          setFireAlarmActive(false);
+          setFireAlarmSilencePending(false);
+          fireAlarmSilencePendingRef.current = false;
+        }
       }
     };
 
@@ -316,6 +408,53 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (fireDetected === null) return;
+    if (fireDetected) {
+      setHazard({
+        type: 'FIRE',
+        title: 'CẢNH BÁO PHÁT HIỆN LỬA!',
+        message: 'Cảm biến lửa phát hiện nguy hiểm. Còi báo đang kêu, vui lòng kiểm tra chuồng nuôi ngay.'
+      });
+      setFireAlarmSilenceError('');
+      return;
+    }
+
+    setFireAlarmSilenced(false);
+    setFireAlarmActive(false);
+    setFireAlarmSilencePending(false);
+    fireAlarmSilencePendingRef.current = false;
+    setFireAlarmSilenceError('');
+    setHazard((current) => current?.type === 'FIRE' ? null : current);
+  }, [fireDetected]);
+
+  useEffect(() => {
+    if (fireDetected === null) {
+      fireDetectedRef.current = false;
+      return;
+    }
+
+    const wasFireDetected = fireDetectedRef.current;
+    fireDetectedRef.current = fireDetected;
+    if (!fireDetected || wasFireDetected) return;
+
+    const notification = {
+      id: `FIRE-${Date.now()}`,
+      category: 'environment',
+      severity: 'critical',
+      sensorType: 'FIRE',
+      sensorLabel: 'Cảm biến lửa',
+      title: 'CẢNH BÁO PHÁT HIỆN LỬA',
+      subtitle: 'Cảm biến lửa tại Chuồng #02 đang kích hoạt còi báo.',
+      description: 'Phát hiện tín hiệu lửa. Còi báo tại thiết bị đã được kích hoạt; vui lòng kiểm tra chuồng nuôi ngay.',
+      timestamp: new Date().toLocaleString('vi-VN'),
+      read: false
+    };
+    saveRecord('notifications', notification.id, notification)
+      .then(() => setLogs((current) => [mapNotificationToLog(notification), ...current]))
+      .catch((error) => console.error('Could not save fire alert notification', error));
+  }, [fireDetected]);
+
+  useEffect(() => {
     let isMounted = true;
     Promise.all([fetchCollection('automationRules'), fetchCollection('devices')])
       .then(([rules, devices]) => {
@@ -325,7 +464,11 @@ export default function App() {
         deviceRecordsRef.current = byId;
         setDevices(devices);
         if (byId.has('FAN_01')) setFanOn(Boolean(byId.get('FAN_01').enabled));
-        if (byId.has('WINDOW_01')) setWindowOpen(Boolean(byId.get('WINDOW_01').enabled));
+        if (byId.has('WINDOW_01')) {
+          const windowRecord = byId.get('WINDOW_01');
+          const savedPosition = Number(windowRecord.positionPercent ?? windowRecord.power);
+          setWindowPercent(Number.isFinite(savedPosition) ? savedPosition : (windowRecord.enabled ? 100 : 0));
+        }
         if (byId.has('HEATER_01')) setHeaterOn(Boolean(byId.get('HEATER_01').enabled));
         if (byId.has('MIST_01')) setMistOn(Boolean(byId.get('MIST_01').enabled));
         if (byId.has('LIGHT_01')) setLightOn(Boolean(byId.get('LIGHT_01').enabled));
@@ -378,12 +521,22 @@ export default function App() {
 
       let conditionMet = false;
       let scheduledOff = false;
+      let windowOffConditionMet = false;
+      const deviceId = rule.targetDeviceId;
       if (rule.type === 'SENSOR') {
         const field = sensorFields[rule.sensorType];
         const comparator = compare[rule.operator];
         const threshold = Number(rule.thresholdValue);
         if (!field || !comparator || !Number.isFinite(threshold) || !Number.isFinite(sensors?.[field])) return;
         conditionMet = comparator(sensors[field], threshold);
+        if (deviceId === 'WINDOW_01' && rule.targetAction === 'ON') {
+          const offField = sensorFields[rule.offSensorType];
+          const offComparator = compare[rule.offOperator];
+          const offThreshold = Number(rule.offThresholdValue);
+          if (offField && offComparator && Number.isFinite(offThreshold) && Number.isFinite(sensors?.[offField])) {
+            windowOffConditionMet = offComparator(sensors[offField], offThreshold);
+          }
+        }
       } else if (rule.type === 'SCHEDULE') {
         const scheduledDays = rule.days || [];
         conditionMet = rule.time === currentTime && scheduledDays.includes(currentDay);
@@ -401,16 +554,32 @@ export default function App() {
       }
 
       if (rule.type === 'SCHEDULE' && !conditionMet && !scheduledOff) return;
-      const targetEnabled = scheduledOff
-        ? false
-        : conditionMet
-          ? rule.targetAction === 'ON'
-          : rule.targetAction !== 'ON';
-      const deviceId = rule.targetDeviceId;
-      if (desiredStates.has(deviceId) && desiredStates.get(deviceId) !== targetEnabled) {
+      let desiredState;
+      if (deviceId === 'WINDOW_01' && rule.type === 'SENSOR' && rule.targetAction === 'ON') {
+        if (windowOffConditionMet) {
+          desiredState = 0;
+        } else if (conditionMet) {
+          desiredState = Number(rule.targetPositionPercent ?? 100);
+        } else {
+          return;
+        }
+      } else {
+        if (deviceId === 'WINDOW_01' && rule.type === 'SENSOR' && !conditionMet) return;
+        const targetEnabled = scheduledOff
+          ? false
+          : conditionMet
+            ? rule.targetAction === 'ON'
+            : rule.targetAction !== 'ON';
+        const targetPower = deviceId === 'WINDOW_01'
+          ? (targetEnabled ? Number(rule.targetPositionPercent ?? 100) : 0)
+          : undefined;
+        desiredState = deviceId === 'WINDOW_01' ? targetPower : targetEnabled;
+      }
+
+      if (desiredStates.has(deviceId) && desiredStates.get(deviceId) !== desiredState) {
         conflictingDevices.add(deviceId);
       } else {
-        desiredStates.set(deviceId, targetEnabled);
+        desiredStates.set(deviceId, desiredState);
       }
     });
 
@@ -445,11 +614,18 @@ export default function App() {
       });
     });
 
-    desiredStates.forEach((enabled, deviceId) => {
+    desiredStates.forEach((desiredState, deviceId) => {
       if (conflictingDevices.has(deviceId)) return;
+      const isWindow = deviceId === 'WINDOW_01';
+      const targetPower = isWindow ? desiredState : undefined;
+      const enabled = isWindow ? targetPower > 0 : desiredState;
       const pendingState = pendingAutomationRef.current.get(deviceId);
       const currentRecord = deviceRecordsRef.current.get(deviceId);
-      if (pendingState !== undefined || (currentRecord && currentRecord.enabled === enabled)) return;
+      if (pendingState !== undefined || (
+        currentRecord
+        && currentRecord.enabled === enabled
+        && (!isWindow || Number(currentRecord.positionPercent ?? currentRecord.power) === targetPower)
+      )) return;
 
       pendingAutomationRef.current.set(deviceId, enabled);
       const catalogDevice = DEVICE_CATALOG.find((device) => device.id === deviceId);
@@ -459,7 +635,11 @@ export default function App() {
         deviceId,
         name: currentRecord?.name || catalogDevice?.name || deviceId,
         enabled,
-        stateText: enabled ? 'Đang bật' : 'Đang tắt',
+        ...(isWindow ? {
+          power: targetPower,
+          positionPercent: targetPower,
+          stateText: targetPower === 0 ? 'Đóng · 0%' : `Mở · ${targetPower}%`
+        } : { stateText: enabled ? 'Đang bật' : 'Đang tắt' }),
         updatedAt: new Date().toISOString(),
         controlSource: 'automation'
       };
@@ -562,7 +742,24 @@ export default function App() {
     setChartData([]);
   };
 
-  const dismissHazard = () => setHazard(null);
+  const dismissHazard = async () => {
+    if (hazard?.type !== 'FIRE') {
+      setHazard(null);
+      return;
+    }
+
+    setFireAlarmSilencePending(true);
+    fireAlarmSilencePendingRef.current = true;
+    setFireAlarmSilenceError('');
+    try {
+      await silenceFireAlarm();
+      setFireAlarmSilenced(true);
+    } catch (error) {
+      fireAlarmSilencePendingRef.current = false;
+      setFireAlarmSilencePending(false);
+      setFireAlarmSilenceError(`Không tắt được còi: ${error.message}`);
+    }
+  };
   
   const persistFeederState = (enabled, extra = {}) => {
     const existingRecord = deviceRecordsRef.current.get('FEEDER_01') || {};
@@ -678,12 +875,12 @@ export default function App() {
   }
   if (activePage === 'devices') {
     return <PageShell activePage={activePage} onNavigate={setActivePage}>
-      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={(enabled) => handleManualDeviceChange('FAN_01', enabled)} windowOpen={windowOpen} setWindowOpen={(enabled) => handleManualDeviceChange('WINDOW_01', enabled)} heaterOn={heaterOn} setHeaterOn={(enabled) => handleManualDeviceChange('HEATER_01', enabled)} mistOn={mistOn} setMistOn={(enabled) => handleManualDeviceChange('MIST_01', enabled)} lightOn={lightOn} setLightOn={(enabled) => handleManualDeviceChange('LIGHT_01', enabled)} feederOn={feederOn} onDispenseFeed={dispenseFeed} onStopDispenseFeed={stopFeedDispensing} feedDispensing={feedDispensing} feedMessage={feedMessage} onNavigate={setActivePage} />
+      <DeviceControls rules={automationRules} fanOn={fanOn} setFanOn={(enabled) => handleManualDeviceChange('FAN_01', enabled)} windowPercent={windowPercent} onWindowPositionChange={handleWindowPositionChange} heaterOn={heaterOn} setHeaterOn={(enabled) => handleManualDeviceChange('HEATER_01', enabled)} mistOn={mistOn} setMistOn={(enabled) => handleManualDeviceChange('MIST_01', enabled)} lightOn={lightOn} setLightOn={(enabled) => handleManualDeviceChange('LIGHT_01', enabled)} feederOn={feederOn} onDispenseFeed={dispenseFeed} onStopDispenseFeed={stopFeedDispensing} feedDispensing={feedDispensing} feedMessage={feedMessage} onNavigate={setActivePage} />
     </PageShell>;
   }
   if (activePage === 'ai-analysis') {
     return <PageShell activePage={activePage} onNavigate={setActivePage}>
-      <AIChickenAnalysis videoStreamUrl={videoStreamUrl} flockData={flockData} logs={logs} inferenceStatus={{ running: false }} />
+      <AIChickenAnalysis videoStreamUrl={videoStreamUrl} flockData={flockData} logs={logs} inferenceStatus={inferenceStatus} />
     </PageShell>;
   }
 
@@ -739,19 +936,36 @@ export default function App() {
               <AlertTriangle className="w-8 h-8 text-red-500 flex-shrink-0" />
               <div>
                 <h3 className="font-bold text-lg text-white">{hazard.title}</h3>
-                <p className="text-sm text-red-300">{hazard.message}</p>
+                <p className="text-sm text-red-300">
+                  {hazard.type === 'FIRE' && fireAlarmSilenced
+                    ? fireAlarmSilencePending
+                      ? 'Đã gửi lệnh tắt còi đến Arduino; đang chờ xác nhận.'
+                      : 'Còi đã tắt. Cảnh báo sẽ giữ nguyên đến khi cảm biến hết phát hiện lửa.'
+                    : hazard.type === 'FIRE' && !fireAlarmActive
+                      ? 'Còi hiện không kêu. Cảnh báo sẽ giữ nguyên đến khi cảm biến hết phát hiện lửa.'
+                    : hazard.message}
+                </p>
               </div>
             </div>
-            <button 
-              onClick={dismissHazard}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg text-sm transition"
-            >
-              Tắt Còi Báo
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={dismissHazard}
+                disabled={hazard.type === 'FIRE' && (!fireAlarmActive || fireAlarmSilenced || fireAlarmSilencePending)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-600"
+              >
+                {hazard.type === 'FIRE'
+                  ? fireAlarmSilencePending ? 'Đang chờ Arduino...' : fireAlarmSilenced ? 'Đã tắt còi' : fireAlarmActive ? 'Tắt Còi Báo' : 'Còi đang tắt'
+                  : 'Tắt Còi Báo'}
+              </button>
+              {hazard.type === 'FIRE' && fireAlarmSilenceError && (
+                <span role="alert" className="text-xs text-red-200">{fireAlarmSilenceError}</span>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Temperature */}
           <div className="bg-[#1e293b] rounded-2xl p-5 border border-slate-700/50 shadow-lg relative overflow-hidden">
             <div className="flex justify-between items-start">
@@ -842,6 +1056,24 @@ export default function App() {
             </div>
           </div>
 
+          {/* Fire sensor */}
+          <div className={`relative overflow-hidden rounded-2xl border p-5 shadow-lg ${fireDetected ? 'border-red-500 bg-red-950/50' : 'border-slate-700/50 bg-[#1e293b]'}`}>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-400">Cảm biến lửa</p>
+                <h3 className={`mt-1 text-2xl font-bold ${fireDetected ? 'text-red-300' : 'text-white'}`}>
+                  {fireDetected === null ? 'Chưa có dữ liệu' : fireDetected ? 'PHÁT HIỆN LỬA' : 'An toàn'}
+                </h3>
+              </div>
+              <div className={`rounded-xl p-3 ${fireDetected ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                <Flame className="h-6 w-6" />
+              </div>
+            </div>
+            <div className={`mt-3 flex items-center text-xs font-semibold ${fireDetected === null ? 'text-slate-500' : fireDetected ? 'text-red-300' : 'text-emerald-400'}`}>
+              {fireDetected === null ? 'Chưa nhận được tín hiệu' : fireDetected ? 'Còi báo đang kích hoạt' : 'Không phát hiện lửa'}
+            </div>
+          </div>
+
           {/* Flock / AI Status */}
           <div className="bg-[#1e293b] rounded-2xl p-5 border border-slate-700/50 shadow-lg relative overflow-hidden">
             <div className="flex justify-between items-start">
@@ -917,8 +1149,9 @@ export default function App() {
                 <h2 className="font-bold text-slate-100">Camera AI Giám Sát Trực Tiếp</h2>
               </div>
               <div className="flex items-center space-x-2 text-xs">
-                <span className="px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1 font-semibold">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> LIVE
+                <span className={`px-2 py-1 rounded border flex items-center gap-1 font-semibold ${inferenceStatus.has_frame && inferenceStatus.running ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
+                  <span className={`w-2 h-2 rounded-full ${inferenceStatus.has_frame && inferenceStatus.running ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                  {inferenceStatus.has_frame && inferenceStatus.running ? 'LIVE' : 'ĐANG KẾT NỐI'}
                 </span>
                 <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-700 font-mono">Py-YOLOv8 Active</span>
               </div>
@@ -930,6 +1163,11 @@ export default function App() {
                 alt="Luồng camera trực tiếp đã được AI phân tích"
                 className="absolute inset-0 w-full h-full object-cover"
                 />
+              {(!inferenceStatus.has_frame || !inferenceStatus.running) && (
+                <div className="absolute inset-x-3 top-3 z-10 rounded-lg border border-slate-700 bg-slate-950/90 px-3 py-2 text-xs text-slate-200" role={inferenceStatus.last_error ? 'alert' : 'status'}>
+                  {inferenceStatus.last_error || (inferenceStatus.has_frame ? 'Luồng camera đã dừng.' : 'Đang khởi tạo camera và mô hình AI...')}
+                </div>
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-black/40"></div>
               <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:16px_16px]"></div>
 
@@ -1156,6 +1394,11 @@ export default function App() {
                     alt="Luồng camera trực tiếp đã được AI phân tích"
                     className="absolute inset-0 w-full h-full object-contain"
                   />
+                  {(!inferenceStatus.has_frame || !inferenceStatus.running) && (
+                    <div className="absolute inset-x-3 top-3 z-10 rounded-lg border border-slate-700 bg-slate-950/90 px-3 py-2 text-xs text-slate-200" role={inferenceStatus.last_error ? 'alert' : 'status'}>
+                      {inferenceStatus.last_error || (inferenceStatus.has_frame ? 'Luồng camera đã dừng.' : 'Đang khởi tạo camera và mô hình AI...')}
+                    </div>
+                  )}
                   {/* Grid Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-black/40"></div>
                   <div className="absolute inset-0 opacity-30 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:20px_20px]"></div>
