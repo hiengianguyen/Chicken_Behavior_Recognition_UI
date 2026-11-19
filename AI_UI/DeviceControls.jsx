@@ -17,8 +17,8 @@ export default function DeviceControls({
   rules,
   fanOn,
   setFanOn,
-  windowOpen,
-  setWindowOpen,
+  windowPercent,
+  onWindowPositionChange,
   heaterOn,
   setHeaterOn,
   mistOn,
@@ -76,19 +76,6 @@ export default function DeviceControls({
             onPersist={persistDevice}
           />
           <DeviceCard
-            title="Mô-tơ cửa gió tự động"
-            subtitle="Động cơ Step-motor"
-            icon={PanelsTopLeft}
-            accent="blue"
-            enabled={windowOpen}
-            onChange={setWindowOpen}
-            stateText={windowOpen ? 'Đang mở' : 'Đang đóng'}
-            detail="Điều khiển thủ công hoặc theo lịch trình"
-            deviceIds={['WINDOW_01']}
-            rules={rules}
-            onPersist={persistDevice}
-          />
-          <DeviceCard
             title="Đèn sưởi hồng ngoại"
             subtitle="Sưởi ấm"
             icon={Flame}
@@ -126,6 +113,22 @@ export default function DeviceControls({
             deviceIds={['LIGHT_01']}
             rules={rules}
             onPersist={persistDevice}
+          />
+          <DeviceCard
+            title="Mô-tơ cửa gió tự động"
+            subtitle="Hai servo đồng bộ"
+            icon={PanelsTopLeft}
+            accent="blue"
+            enabled={windowPercent > 0}
+            stateText={windowPercent === 0 ? 'Đóng · 0%' : windowPercent === 50 ? 'Vừa mở · 50%' : `Mở · ${windowPercent}%`}
+            detail="Điều khiển thủ công hoặc theo lịch trình"
+            deviceIds={['WINDOW_01']}
+            rules={rules}
+            onPersist={persistDevice}
+            positionControl={{
+              value: windowPercent,
+              onChange: (power) => persistDevice(onWindowPositionChange(power))
+            }}
           />
           <DeviceCard
             title="Máng cho ăn tự động"
@@ -209,7 +212,7 @@ export default function DeviceControls({
   );
 }
 
-function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, onToggle, stateText, detail, deviceIds, rules, onPersist, actionOptions, selectedActionValue, onActionSelect, actionDisabled, actionStatus }) {
+function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, onToggle, stateText, detail, deviceIds, rules, onPersist, actionOptions, selectedActionValue, onActionSelect, actionDisabled, actionStatus, positionControl }) {
   const accents = {
     cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300',
     blue: 'border-blue-500/20 bg-blue-500/10 text-blue-300',
@@ -228,7 +231,11 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, on
             <p className="mt-0.5 truncate text-xs text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <label className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center" title={`Bật/tắt ${title}`}>
+        {positionControl ? (
+          <span className="shrink-0 rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-200">
+            {positionControl.value}%
+          </span>
+        ) : <label className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center" title={`Bật/tắt ${title}`}>
           <input type="checkbox" className="peer sr-only" checked={enabled} onChange={(event) => {
             const nextEnabled = event.target.checked;
             if (onToggle) {
@@ -245,8 +252,30 @@ function DeviceCard({ title, subtitle, icon: Icon, accent, enabled, onChange, on
           }} aria-label={`Bật/tắt ${title}`} />
           <span className="absolute inset-0 rounded-full bg-slate-700 transition peer-checked:bg-emerald-600 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#1e293b]" />
           <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
-        </label>
+        </label>}
       </div>
+      {positionControl && (
+        <fieldset className="mt-4">
+          <legend className="mb-2 text-xs font-semibold text-slate-300">Độ mở cửa gió</legend>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Chọn độ mở cửa gió">
+            {[
+              { value: 0, label: 'Đóng' },
+              { value: 50, label: 'Vừa' },
+              { value: 100, label: 'Mở' }
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={positionControl.value === option.value}
+                onClick={() => positionControl.onChange(option.value)}
+                className={`min-h-10 rounded-lg border px-2 text-xs font-semibold transition ${positionControl.value === option.value ? 'border-blue-400/50 bg-blue-500/20 text-blue-100' : 'border-slate-700 bg-slate-900/70 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}
+              >
+                {option.label}<span className="ml-1 text-[10px] opacity-75">{option.value}%</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
       {actionOptions && (
         <div className="mt-4 space-y-2">
           <label htmlFor="feed-duration" className="block text-xs font-semibold text-slate-300">Thời lượng xả cám</label>
